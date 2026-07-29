@@ -1,0 +1,90 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type Config struct {
+	Environment      string
+	Address          string
+	DatabaseURL      string
+	DatabaseMaxOpen  int
+	DatabaseMaxIdle  int
+	DevLoginSubject  string
+	TrustAuthHeaders bool
+	AllowedOrigins   []string
+	ReadTimeout      time.Duration
+	WriteTimeout     time.Duration
+	ShutdownTimeout  time.Duration
+}
+
+func Load() (Config, error) {
+	environment := env("CONTROL_ENV", "development")
+	trustHeaders, err := strconv.ParseBool(env("CONTROL_TRUST_AUTH_HEADERS", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("CONTROL_TRUST_AUTH_HEADERS: %w", err)
+	}
+
+	devSubject := env("CONTROL_DEV_LOGIN_SUBJECT", "logto_01vf9k2")
+	if environment == "production" && devSubject != "" {
+		return Config{}, fmt.Errorf("CONTROL_DEV_LOGIN_SUBJECT must be empty in production")
+	}
+	if environment == "production" && !trustHeaders {
+		return Config{}, fmt.Errorf("CONTROL_TRUST_AUTH_HEADERS must be true in production until JWT validation is configured")
+	}
+	databaseURL := strings.TrimSpace(os.Getenv("CONTROL_DATABASE_URL"))
+	if environment == "production" && databaseURL == "" {
+		return Config{}, fmt.Errorf("CONTROL_DATABASE_URL is required in production")
+	}
+
+	return Config{
+		Environment:      environment,
+		Address:          env("CONTROL_ADDRESS", ":8080"),
+		DatabaseURL:      databaseURL,
+		DatabaseMaxOpen:  positiveInt("CONTROL_DATABASE_MAX_OPEN", 5),
+		DatabaseMaxIdle:  positiveInt("CONTROL_DATABASE_MAX_IDLE", 2),
+		DevLoginSubject:  devSubject,
+		TrustAuthHeaders: trustHeaders,
+		AllowedOrigins:   splitCSV(os.Getenv("CONTROL_ALLOWED_ORIGINS")),
+		ReadTimeout:      10 * time.Second,
+		WriteTimeout:     15 * time.Second,
+		ShutdownTimeout:  10 * time.Second,
+	}, nil
+}
+
+func positiveInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func env(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return strings.TrimSpace(value)
+	}
+	return fallback
+}
+
+func splitCSV(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
