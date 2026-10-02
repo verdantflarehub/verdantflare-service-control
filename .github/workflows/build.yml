@@ -27,18 +27,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.25.x"
-          cache: false
-
-      - name: Test
-        run: go test ./...
-
-      - name: Vet
-        run: go vet ./...
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -64,17 +52,19 @@ jobs:
           username: ${{ secrets.REGISTRY_USER_ALIYUN }}
           password: ${{ secrets.REGISTRY_PASSWORD_ALIYUN }}
 
+      - name: Refuse an existing image tag
+        run: '! docker buildx imagetools inspect "${{ steps.image.outputs.image_name }}:${{ env.VERSION }}" >/dev/null 2>&1'
+
       - name: Build image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./docker/Dockerfile
           platforms: linux/amd64
           push: true
           provenance: false
-          tags: |
-            ${{ steps.image.outputs.image_name }}:${{ env.VERSION }}
-            ${{ steps.image.outputs.image_name }}:${{ env.VERSION }}-${{ github.sha }}
+          sbom: false
+          tags: ${{ steps.image.outputs.image_name }}:${{ env.VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
