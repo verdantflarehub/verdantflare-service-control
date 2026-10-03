@@ -34,4 +34,10 @@ type Repository interface {
 
 	ListReleases(context.Context) ([]domain.Release, error)
 	ListOperationsOrganizations(context.Context) ([]domain.OperationsOrganization, error)
+	CreateManagedApp(context.Context, domain.App) (domain.ManagedApp, error)
+	ManagedApp(context.Context, string) (domain.ManagedApp, error)
+	UpdateManagedApp(context.Context, string, domain.App) (domain.ManagedApp, error)
+	CreateManagedOrganization(context.Context, domain.Organization) (domain.ManagedOrganization, error)
+	ManagedOrganization(context.Context, string) (domain.ManagedOrganization, error)
+	UpdateManagedOrganization(context.Context, string, domain.Organization, []string, int) (domain.ManagedOrganization, error)
 }

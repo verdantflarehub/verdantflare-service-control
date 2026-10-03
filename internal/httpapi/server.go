@@ -59,6 +59,12 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 
 	mux.HandleFunc("GET /api/control/ops/releases", server.listReleases)
 	mux.HandleFunc("GET /api/control/ops/organizations", server.listOperationsOrganizations)
+	mux.HandleFunc("POST /api/control/ops/apps", server.createManagedApp)
+	mux.HandleFunc("GET /api/control/ops/apps/{appID}", server.getManagedApp)
+	mux.HandleFunc("PATCH /api/control/ops/apps/{appID}", server.updateManagedApp)
+	mux.HandleFunc("POST /api/control/ops/organizations", server.createManagedOrganization)
+	mux.HandleFunc("GET /api/control/ops/organizations/{organizationID}", server.getManagedOrganization)
+	mux.HandleFunc("PATCH /api/control/ops/organizations/{organizationID}", server.updateManagedOrganization)
 
 	server.handler = server.middleware(mux)
 	return server

@@ -126,6 +126,158 @@ func TestUnknownJSONFieldRejected(t *testing.T) {
 	}
 }
 
+func TestManagedAppPublicationAndEntitlement(t *testing.T) {
+	server := newTestServer(t, testConfig())
+	appID := "workflow-demo"
+	created := request(t, server, http.MethodPost, "/api/control/ops/apps", map[string]any{
+		"id": appID, "name": "Workflow Demo", "version": "0.1.0", "category": "视觉创作", "summary": "测试应用",
+	})
+	if created.StatusCode != http.StatusCreated {
+		t.Fatalf("create app status = %d, body = %s", created.StatusCode, readBody(t, created))
+	}
+	created.Body.Close()
+
+	market := request(t, server, http.MethodGet, "/api/control/market/apps", nil)
+	var before []domain.App
+	decode(t, market, &before)
+	market.Body.Close()
+	if containsApp(before, appID) {
+		t.Fatal("candidate app appeared in customer Market")
+	}
+
+	updated := request(t, server, http.MethodPatch, "/api/control/ops/apps/"+appID, map[string]any{
+		"name": "Workflow Demo", "version": "0.1.0", "category": "视觉创作", "summary": "测试应用", "channel": "Preview",
+	})
+	if updated.StatusCode != http.StatusOK {
+		t.Fatalf("publish status = %d, body = %s", updated.StatusCode, readBody(t, updated))
+	}
+	updated.Body.Close()
+
+	market = request(t, server, http.MethodGet, "/api/control/market/apps", nil)
+	var withoutGrant []domain.App
+	decode(t, market, &withoutGrant)
+	market.Body.Close()
+	if containsApp(withoutGrant, appID) {
+		t.Fatal("unentitled app appeared in customer Market")
+	}
+
+	organization := request(t, server, http.MethodGet, "/api/control/ops/organizations/org_verdantflare", nil)
+	var managed domain.ManagedOrganization
+	decode(t, organization, &managed)
+	organization.Body.Close()
+	if organization.StatusCode != http.StatusOK {
+		t.Fatalf("get organization status = %d", organization.StatusCode)
+	}
+	appIDs := append(managed.AppIDs, appID)
+	grant := request(t, server, http.MethodPatch, "/api/control/ops/organizations/org_verdantflare", map[string]any{
+		"plan": "Enterprise", "status": "正常", "appIds": appIDs,
+		"expectedEntitlementVersion": managed.Organization.EntitlementVersion,
+	})
+	if grant.StatusCode != http.StatusOK {
+		t.Fatalf("grant status = %d, body = %s", grant.StatusCode, readBody(t, grant))
+	}
+	var granted domain.ManagedOrganization
+	decode(t, grant, &granted)
+	grant.Body.Close()
+	if granted.Organization.EntitlementVersion != managed.Organization.EntitlementVersion+1 {
+		t.Fatalf("entitlement version = %d", granted.Organization.EntitlementVersion)
+	}
+
+	market = request(t, server, http.MethodGet, "/api/control/market/apps", nil)
+	var entitled []domain.App
+	decode(t, market, &entitled)
+	market.Body.Close()
+	if !containsApp(entitled, appID) {
+		t.Fatal("published entitled app missing from customer Market")
+	}
+
+	stale := request(t, server, http.MethodPatch, "/api/control/ops/organizations/org_verdantflare", map[string]any{
+		"plan": "Enterprise", "status": "正常", "appIds": appIDs,
+		"expectedEntitlementVersion": managed.Organization.EntitlementVersion,
+	})
+	if stale.StatusCode != http.StatusConflict {
+		t.Fatalf("stale version status = %d, body = %s", stale.StatusCode, readBody(t, stale))
+	}
+	stale.Body.Close()
+
+	frozen := request(t, server, http.MethodPatch, "/api/control/ops/organizations/org_verdantflare", map[string]any{
+		"plan": "Enterprise", "status": "冻结", "appIds": appIDs,
+		"expectedEntitlementVersion": granted.Organization.EntitlementVersion,
+	})
+	if frozen.StatusCode != http.StatusOK {
+		t.Fatalf("freeze status = %d, body = %s", frozen.StatusCode, readBody(t, frozen))
+	}
+	frozen.Body.Close()
+	market = request(t, server, http.MethodGet, "/api/control/market/apps", nil)
+	var afterFreeze []domain.App
+	decode(t, market, &afterFreeze)
+	market.Body.Close()
+	if len(afterFreeze) != 0 {
+		t.Fatalf("frozen organization still has %d Market apps", len(afterFreeze))
+	}
+}
+
+func TestManagedWriteRequiresCurrentOperationsRole(t *testing.T) {
+	server := newTestServer(t, testConfig())
+	switched := request(t, server, http.MethodPut, "/api/control/context/active-organization", map[string]string{"organizationId": "org_northshore"})
+	if switched.StatusCode != http.StatusOK {
+		t.Fatalf("switch status = %d, body = %s", switched.StatusCode, readBody(t, switched))
+	}
+	switched.Body.Close()
+	response := request(t, server, http.MethodPost, "/api/control/ops/apps", map[string]any{"id": "forbidden-demo", "name": "Forbidden Demo", "version": "0.1.0"})
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("create app status = %d, body = %s", response.StatusCode, readBody(t, response))
+	}
+	response.Body.Close()
+}
+
+func TestCreateOrganizationAndMemberRecord(t *testing.T) {
+	server := newTestServer(t, testConfig())
+	created := request(t, server, http.MethodPost, "/api/control/ops/organizations", map[string]any{"name": "测试客户组织", "plan": "Pilot"})
+	if created.StatusCode != http.StatusCreated {
+		t.Fatalf("create organization status = %d, body = %s", created.StatusCode, readBody(t, created))
+	}
+	var organization domain.ManagedOrganization
+	decode(t, created, &organization)
+	created.Body.Close()
+	if organization.Organization.EntitlementVersion != 1 || len(organization.AppIDs) != 0 {
+		t.Fatalf("unexpected new organization: %+v", organization)
+	}
+	read := request(t, server, http.MethodGet, "/api/control/ops/organizations/"+organization.Organization.OrganizationID, nil)
+	if read.StatusCode != http.StatusOK {
+		t.Fatalf("read organization status = %d, body = %s", read.StatusCode, readBody(t, read))
+	}
+	read.Body.Close()
+
+	invited := request(t, server, http.MethodPost, "/api/control/settings/members", map[string]any{"email": "new.member@example.test", "role": "成员"})
+	if invited.StatusCode != http.StatusCreated {
+		t.Fatalf("create member record status = %d, body = %s", invited.StatusCode, readBody(t, invited))
+	}
+	invited.Body.Close()
+	list := request(t, server, http.MethodGet, "/api/control/settings/members", nil)
+	var members []domain.Member
+	decode(t, list, &members)
+	list.Body.Close()
+	found := false
+	for _, member := range members {
+		if member.Email == "new.member@example.test" && member.Status == "待邀请" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("saved pending member record missing from list")
+	}
+}
+
+func containsApp(apps []domain.App, id string) bool {
+	for _, app := range apps {
+		if app.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func newTestServer(t *testing.T, configuration config.Config) *httptest.Server {
 	t.Helper()
 	repository := store.NewMemorySeeded(time.Date(2026, 7, 19, 8, 0, 0, 0, time.UTC))

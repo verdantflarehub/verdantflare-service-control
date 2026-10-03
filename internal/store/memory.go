@@ -217,10 +217,13 @@ func (m *Memory) UpdateOrganization(_ context.Context, organizationID string, up
 func (m *Memory) ListApps(_ context.Context, organizationID string) ([]domain.App, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if m.organizations[organizationID].Status == "冻结" {
+		return []domain.App{}, nil
+	}
 	entitlements := m.entitlements[organizationID]
 	result := make([]domain.App, 0, len(entitlements))
 	for id, entitled := range entitlements {
-		if app, ok := m.apps[id]; ok && entitled {
+		if app, ok := m.apps[id]; ok && entitled && published(app) {
 			result = append(result, app)
 		}
 	}
@@ -231,11 +234,11 @@ func (m *Memory) ListApps(_ context.Context, organizationID string) ([]domain.Ap
 func (m *Memory) GetApp(_ context.Context, organizationID, appID string) (domain.App, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if !m.entitlements[organizationID][appID] {
+	if m.organizations[organizationID].Status == "冻结" || !m.entitlements[organizationID][appID] {
 		return domain.App{}, domain.NewError(404, "app_not_found", "应用不存在或当前组织无权查看")
 	}
 	app, ok := m.apps[appID]
-	if !ok {
+	if !ok || !published(app) {
 		return domain.App{}, domain.NewError(404, "app_not_found", "应用不存在")
 	}
 	return app, nil
@@ -400,13 +403,29 @@ func (m *Memory) Billing(_ context.Context, organizationID string) (domain.Billi
 func (m *Memory) ListReleases(_ context.Context) ([]domain.Release, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return append([]domain.Release(nil), m.releases...), nil
+	result := make([]domain.Release, 0, len(m.apps))
+	for _, app := range m.apps {
+		result = append(result, m.releaseForLocked(app))
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].App < result[j].App })
+	return result, nil
 }
 
 func (m *Memory) ListOperationsOrganizations(_ context.Context) ([]domain.OperationsOrganization, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return append([]domain.OperationsOrganization(nil), m.opsOrgs...), nil
+	result := make([]domain.OperationsOrganization, 0, len(m.organizations))
+	for id, organization := range m.organizations {
+		appCount := 0
+		for appID, enabled := range m.entitlements[id] {
+			if enabled && published(m.apps[appID]) {
+				appCount++
+			}
+		}
+		result = append(result, domain.OperationsOrganization{ID: id, Name: organization.Name, Plan: organization.Plan, Members: len(m.members[id]), Apps: appCount, APIUsage: fmt.Sprintf("%d 点", m.billing[id].APIUsed), Expires: "—", Status: organization.Status})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result, nil
 }
 
 func membershipFor(user domain.CenterUser, organizationID string) (domain.Membership, bool) {

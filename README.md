@@ -11,7 +11,8 @@ VerdantFlare Hub 的 Go 业务后端。首期采用模块化单体，统一暴�
 - API Key 创建、范围和有效期校验、撤销；完整 Secret 只返回一次，服务端只保留 SHA-256。
 - 模型目录、任务和用量聚合接口。
 - 组织资料、成员邀请和账单摘要。
-- 应用发布与客户运营接口的内部角色校验。
+- 应用 Candidate → Preview 发布、客户组织创建/冻结与应用权益分配；运营操作按当前角色校验并持久化。
+- 成员邀请在本版保存为待接受业务记录，不创建 Login 账号或发送邮件。
 - 统一 JSON 错误、Request ID、安全响应头、请求体限制和优雅退出。
 
 ## 本地运行
@@ -68,12 +69,20 @@ CONTROL_TRUST_AUTH_HEADERS=true
 | GET | `/api/control/settings/billing` | 账单摘要 |
 | GET | `/api/control/ops/releases` | 应用发布运营 |
 | GET | `/api/control/ops/organizations` | 客户组织运营 |
+| POST | `/api/control/ops/apps` | 创建 Candidate 应用，需 `app_ops_admin` |
+| GET/PATCH | `/api/control/ops/apps/{id}` | 查看、编辑应用与发布通道，需 `app_ops_admin` |
+| POST | `/api/control/ops/organizations` | 创建无权益客户组织，需 `customer_success_admin` |
+| GET/PATCH | `/api/control/ops/organizations/{id}` | 查看、更新套餐/冻结状态/应用权益，需 `customer_success_admin` |
 
 ## 数据存储
 
 领域层只依赖 `store.Repository`。配置 `CONTROL_DATABASE_URL` 后，首版 PostgreSQL Repository 将模块化单体状态保存在一个 JSONB 聚合行中，所有写操作通过行锁短事务串行化，支持 Pod 重启和单副本滚动发布。开发环境未配置数据库时仍可使用内存实现。
 
 该聚合存储是首发过渡边界；业务量增长或需要多副本高写入吞吐时，应将组织、成员、Session 和 API Key 拆为规范化表，并将模型、Token、原始任务和余额接口逐步接入 `verdantflare-api`。
+
+创建的应用默认 `Candidate`，不会出现在客户 Market。运营发布到 `Preview` 后，还需在客户组织详情授权；冻结组织、暂停或退回 Candidate 的应用都不会在 Market 显示。组织权益更新使用 `expectedEntitlementVersion` 检查并发修改，冲突返回 409；未发布应用的已有授权会保留，避免修改套餐时被隐式删除。
+
+首版尚未打通 Login 账号邀请/禁用、邮件投递、Studio/Station 的真实安装与运行，以及模型提供商配置。页面不应把待接受成员记录或体验 Session 记录当作这些能力已生效。
 
 ## 验证
 
@@ -82,3 +91,5 @@ make test
 make vet
 make build
 ```
+
+持久化回归测试使用独立、可丢弃的 PostgreSQL 数据库。先应用 `migrations/postgres/001_init.sql`，再设置 `CONTROL_TEST_DATABASE_URL` 运行 `go test ./internal/store -run TestManagedAppSurvivesPostgresReopen -v`。

@@ -143,6 +143,7 @@ type Invoice struct {
 }
 
 type Release struct {
+	AppID      string `json:"appId"`
 	App        string `json:"app"`
 	Version    string `json:"version"`
 	Channel    string `json:"channel"`
@@ -150,6 +151,18 @@ type Release struct {
 	Audience   string `json:"audience"`
 	Updated    string `json:"updated"`
 	Status     string `json:"status"`
+}
+
+type ManagedApp struct {
+	App     App     `json:"app"`
+	Release Release `json:"release"`
+}
+
+type ManagedOrganization struct {
+	Organization Organization `json:"organization"`
+	Apps         []App        `json:"apps"`
+	AppIDs       []string     `json:"appIds"`
+	Members      []Member     `json:"members"`
 }
 
 type OperationsOrganization struct {
