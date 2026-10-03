@@ -3,7 +3,6 @@ package control
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"net/mail"
@@ -71,32 +70,10 @@ func (s *Service) Overview(ctx context.Context, subject string) (domain.Overview
 	if err != nil {
 		return domain.Overview{}, err
 	}
-	sessions, err := s.repository.ListExperienceSessions(ctx, organization.OrganizationID)
-	if err != nil {
-		return domain.Overview{}, err
-	}
-	tasks, err := s.repository.ListAPITasks(ctx, organization.OrganizationID)
-	if err != nil {
-		return domain.Overview{}, err
-	}
-	usage, err := s.repository.Usage(ctx, organization.OrganizationID)
-	if err != nil {
-		return domain.Overview{}, err
-	}
-	overview := domain.Overview{Organization: organization, AvailableApps: len(apps), ExperienceCredits: organization.ExperienceCredits, APICredits: organization.APICredits, APIUsagePercentage: usage.Percentage}
+	overview := domain.Overview{Organization: organization, AvailableApps: len(apps)}
 	for _, app := range apps {
 		if app.Channel == "Preview" {
 			overview.PreviewApps++
-		}
-	}
-	for _, session := range sessions {
-		if session.Status == "运行中" {
-			overview.RunningSessions++
-		}
-	}
-	for _, task := range tasks {
-		if task.Status == "运行中" {
-			overview.RunningAPITasks++
 		}
 	}
 	return overview, nil
@@ -134,35 +111,12 @@ func (s *Service) ListExperienceSessions(ctx context.Context, subject string) ([
 }
 
 func (s *Service) CreateExperienceSession(ctx context.Context, subject string, input CreateExperienceInput) (domain.ExperienceSession, error) {
-	organization, _, centerUserID, err := s.activeOrganization(ctx, subject)
-	if err != nil {
+	if _, _, _, err := s.activeOrganization(ctx, subject); err != nil {
 		return domain.ExperienceSession{}, err
 	}
-	input.AppID = strings.TrimSpace(input.AppID)
-	if input.AppID == "" {
-		return domain.ExperienceSession{}, domain.NewError(400, "app_required", "appId 不能为空")
-	}
-	if !slices.Contains([]string{"cn-east-1", "cn-north-1"}, input.Region) {
-		return domain.ExperienceSession{}, domain.NewError(400, "region_invalid", "region 仅支持 cn-east-1 或 cn-north-1")
-	}
-	app, err := s.repository.GetApp(ctx, organization.OrganizationID, input.AppID)
-	if err != nil {
-		return domain.ExperienceSession{}, err
-	}
-	if app.Status == "申请体验" {
-		return domain.ExperienceSession{}, domain.NewError(403, "experience_not_entitled", "当前应用尚未开放在线体验")
-	}
-	duration := map[string]time.Duration{
-		"wan-video":  30 * time.Minute,
-		"f5-tts":     45 * time.Minute,
-		"face-lip":   45 * time.Minute,
-		"open-cut":   90 * time.Minute,
-		"open-webui": 120 * time.Minute,
-	}[app.ID]
-	if duration == 0 {
-		duration = 60 * time.Minute
-	}
-	return s.repository.CreateExperienceSession(ctx, organization.OrganizationID, centerUserID, app, input.Region, duration, 20)
+	// A database row is not a running workspace. Do not accept trials until a
+	// resource allocator, execution path, and cleanup worker are connected.
+	return domain.ExperienceSession{}, domain.NewError(503, "experience_unavailable", "在线体验运行资源尚未接入，暂不能创建 Session")
 }
 
 func (s *Service) CloseExperienceSession(ctx context.Context, subject, sessionID string) (domain.ExperienceSession, error) {
@@ -182,51 +136,14 @@ func (s *Service) ListAPIKeys(ctx context.Context, subject string) ([]domain.API
 }
 
 func (s *Service) CreateAPIKey(ctx context.Context, subject string, input CreateAPIKeyInput) (CreateAPIKeyResult, error) {
-	organization, roles, _, err := s.activeOrganization(ctx, subject)
+	_, roles, _, err := s.activeOrganization(ctx, subject)
 	if err != nil {
 		return CreateAPIKeyResult{}, err
 	}
 	if !hasAnyRole(roles, "organization_admin", "api_ops_admin") {
 		return CreateAPIKeyResult{}, domain.NewError(403, "api_key_forbidden", "当前角色不能创建 API Key")
 	}
-	input.Name = strings.TrimSpace(input.Name)
-	if input.Name == "" || utf8.RuneCountInString(input.Name) > 80 {
-		return CreateAPIKeyResult{}, domain.NewError(400, "api_key_name_invalid", "Key 名称不能为空且不能超过 80 个字符")
-	}
-	if len(input.Scopes) == 0 {
-		input.Scopes = []string{"models:read"}
-	}
-	allowedScopes := []string{"models:read", "tasks:write", "usage:read"}
-	for _, scope := range input.Scopes {
-		if !slices.Contains(allowedScopes, scope) {
-			return CreateAPIKeyResult{}, domain.NewError(400, "api_key_scope_invalid", fmt.Sprintf("不支持的权限范围：%s", scope))
-		}
-	}
-	input.Scopes = uniqueStrings(input.Scopes)
-	if !slices.Contains(input.Scopes, "models:read") {
-		input.Scopes = append([]string{"models:read"}, input.Scopes...)
-	}
-	if input.ExpiresInDays == 0 {
-		input.ExpiresInDays = 90
-	}
-	if input.ExpiresInDays < 1 || input.ExpiresInDays > 365 {
-		return CreateAPIKeyResult{}, domain.NewError(400, "api_key_expiry_invalid", "expiresInDays 必须在 1 到 365 之间")
-	}
-	secret, err := newSecret()
-	if err != nil {
-		return CreateAPIKeyResult{}, fmt.Errorf("generate API key: %w", err)
-	}
-	now := s.now()
-	expiresAt := now.AddDate(0, 0, input.ExpiresInDays)
-	key := domain.APIKey{
-		ID: newID("key"), Name: input.Name, Prefix: redactSecret(secret), Scopes: input.Scopes,
-		CreatedAt: now, ExpiresAt: &expiresAt, Status: "有效", SecretHash: sha256.Sum256([]byte(secret)),
-	}
-	created, err := s.repository.CreateAPIKey(ctx, organization.OrganizationID, key)
-	if err != nil {
-		return CreateAPIKeyResult{}, err
-	}
-	return CreateAPIKeyResult{ID: created.ID, Name: created.Name, Secret: secret, Scopes: created.Scopes, CreatedAt: created.CreatedAt, ExpiresAt: created.ExpiresAt}, nil
+	return CreateAPIKeyResult{}, domain.NewError(503, "api_key_unavailable", "模型网关凭证同步尚未接入，暂不能创建 API Key")
 }
 
 func (s *Service) RevokeAPIKey(ctx context.Context, subject, keyID string) error {
@@ -241,27 +158,25 @@ func (s *Service) RevokeAPIKey(ctx context.Context, subject, keyID string) error
 }
 
 func (s *Service) ListModels(ctx context.Context, subject string) ([]domain.Model, error) {
-	organization, _, _, err := s.activeOrganization(ctx, subject)
-	if err != nil {
+	if _, _, _, err := s.activeOrganization(ctx, subject); err != nil {
 		return nil, err
 	}
-	return s.repository.ListModels(ctx, organization.OrganizationID)
+	// Model availability and pricing are owned by the gateway, not bootstrap rows.
+	return []domain.Model{}, nil
 }
 
 func (s *Service) ListAPITasks(ctx context.Context, subject string) ([]domain.APITask, error) {
-	organization, _, _, err := s.activeOrganization(ctx, subject)
-	if err != nil {
+	if _, _, _, err := s.activeOrganization(ctx, subject); err != nil {
 		return nil, err
 	}
-	return s.repository.ListAPITasks(ctx, organization.OrganizationID)
+	return []domain.APITask{}, nil
 }
 
 func (s *Service) Usage(ctx context.Context, subject string) (domain.UsageSummary, error) {
-	organization, _, _, err := s.activeOrganization(ctx, subject)
-	if err != nil {
+	if _, _, _, err := s.activeOrganization(ctx, subject); err != nil {
 		return domain.UsageSummary{}, err
 	}
-	return s.repository.Usage(ctx, organization.OrganizationID)
+	return domain.UsageSummary{}, domain.NewError(503, "usage_unavailable", "模型网关用量尚未接入")
 }
 
 func (s *Service) Organization(ctx context.Context, subject string) (domain.Organization, error) {
@@ -309,14 +224,14 @@ func (s *Service) InviteMember(ctx context.Context, subject string, input Invite
 }
 
 func (s *Service) Billing(ctx context.Context, subject string) (domain.BillingSummary, error) {
-	organization, roles, _, err := s.activeOrganization(ctx, subject)
+	_, roles, _, err := s.activeOrganization(ctx, subject)
 	if err != nil {
 		return domain.BillingSummary{}, err
 	}
 	if !hasAnyRole(roles, "organization_admin", "billing_viewer") {
 		return domain.BillingSummary{}, domain.NewError(403, "billing_forbidden", "当前角色不能查看账单")
 	}
-	return s.repository.Billing(ctx, organization.OrganizationID)
+	return domain.BillingSummary{}, domain.NewError(503, "billing_unavailable", "真实账单数据尚未接入")
 }
 
 func (s *Service) ListReleases(ctx context.Context, subject string) ([]domain.Release, error) {
@@ -355,35 +270,6 @@ func hasAnyRole(actual []string, required ...string) bool {
 		}
 	}
 	return false
-}
-
-func uniqueStrings(values []string) []string {
-	seen := make(map[string]struct{}, len(values))
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		result = append(result, value)
-	}
-	return result
-}
-
-func newSecret() (string, error) {
-	bytes := make([]byte, 24)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return "vf_live_" + base64.RawURLEncoding.EncodeToString(bytes), nil
-}
-
-func redactSecret(secret string) string {
-	if len(secret) < 18 {
-		return "vf_live_••••••••"
-	}
-	return secret[:13] + "••••••••" + secret[len(secret)-4:]
 }
 
 func newID(prefix string) string {

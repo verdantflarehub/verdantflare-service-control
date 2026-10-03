@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -53,52 +52,26 @@ func TestOverviewAggregatesCurrentOrganization(t *testing.T) {
 	}
 	var overview domain.Overview
 	decode(t, response, &overview)
-	if overview.AvailableApps != 6 || overview.RunningSessions != 1 || overview.Organization.OrganizationID != "org_verdantflare" {
+	if overview.AvailableApps != 6 || overview.Organization.OrganizationID != "org_verdantflare" {
 		t.Fatalf("unexpected overview: %+v", overview)
 	}
 }
 
-func TestExperienceSessionLifecycle(t *testing.T) {
+func TestExperienceSessionUnavailableWithoutRuntime(t *testing.T) {
 	server := newTestServer(t, testConfig())
 	createdResponse := request(t, server, http.MethodPost, "/api/control/experience/sessions", map[string]any{"appId": "wan-video", "region": "cn-east-1"})
 	defer createdResponse.Body.Close()
-	if createdResponse.StatusCode != http.StatusCreated {
+	if createdResponse.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("create status = %d, body = %s", createdResponse.StatusCode, readBody(t, createdResponse))
-	}
-	var created domain.ExperienceSession
-	decode(t, createdResponse, &created)
-	if created.Status != "运行中" || created.AppID != "wan-video" {
-		t.Fatalf("unexpected session: %+v", created)
-	}
-
-	closeResponse := request(t, server, http.MethodDelete, "/api/control/experience/sessions/"+created.ID, nil)
-	defer closeResponse.Body.Close()
-	if closeResponse.StatusCode != http.StatusNoContent {
-		t.Fatalf("close status = %d, body = %s", closeResponse.StatusCode, readBody(t, closeResponse))
 	}
 }
 
-func TestAPIKeySecretReturnedOnce(t *testing.T) {
+func TestAPIKeyUnavailableUntilGatewayIntegration(t *testing.T) {
 	server := newTestServer(t, testConfig())
 	createdResponse := request(t, server, http.MethodPost, "/api/control/api-keys", map[string]any{"name": "CI 测试", "scopes": []string{"models:read", "tasks:write"}})
 	defer createdResponse.Body.Close()
-	if createdResponse.StatusCode != http.StatusCreated {
+	if createdResponse.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("create status = %d, body = %s", createdResponse.StatusCode, readBody(t, createdResponse))
-	}
-	var created control.CreateAPIKeyResult
-	decode(t, createdResponse, &created)
-	if !strings.HasPrefix(created.Secret, "vf_live_") {
-		t.Fatalf("secret = %q", created.Secret)
-	}
-
-	listResponse := request(t, server, http.MethodGet, "/api/control/api-keys", nil)
-	defer listResponse.Body.Close()
-	body := readBody(t, listResponse)
-	if strings.Contains(body, created.Secret) {
-		t.Fatal("API key list exposed the full secret")
-	}
-	if !strings.Contains(body, "••••••••") {
-		t.Fatalf("redacted prefix missing: %s", body)
 	}
 }
 
@@ -325,7 +298,7 @@ func TestHubPageDataEndpointsAndAPIKeyLifecycle(t *testing.T) {
 	for _, path := range []string{
 		"/api/control/overview", "/api/control/api/models", "/api/control/market/apps",
 		"/api/control/api-keys", "/api/control/settings/organization", "/api/control/settings/members",
-		"/api/control/settings/billing", "/api/control/ops/releases", "/api/control/ops/organizations",
+		"/api/control/ops/releases", "/api/control/ops/organizations",
 	} {
 		response := request(t, server, http.MethodGet, path, nil)
 		if response.StatusCode != http.StatusOK {
@@ -333,19 +306,14 @@ func TestHubPageDataEndpointsAndAPIKeyLifecycle(t *testing.T) {
 		}
 		response.Body.Close()
 	}
-	created := request(t, server, http.MethodPost, "/api/control/api-keys", map[string]any{
-		"name": "Hub smoke", "scopes": []string{"models:read", "usage:read"}, "expiresInDays": 30,
-	})
-	if created.StatusCode != http.StatusCreated {
-		t.Fatalf("create key status = %d, body = %s", created.StatusCode, readBody(t, created))
+	for _, path := range []string{"/api/control/settings/billing", "/api/control/api/usage"} {
+		response := request(t, server, http.MethodGet, path, nil)
+		if response.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("GET %s status = %d, body = %s", path, response.StatusCode, readBody(t, response))
+		}
+		response.Body.Close()
 	}
-	var key control.CreateAPIKeyResult
-	decode(t, created, &key)
-	created.Body.Close()
-	if key.ID == "" || key.Secret == "" {
-		t.Fatalf("created key lacks one-time secret: %+v", key)
-	}
-	revoked := request(t, server, http.MethodDelete, "/api/control/api-keys/"+key.ID, nil)
+	revoked := request(t, server, http.MethodDelete, "/api/control/api-keys/key_prod_31", nil)
 	if revoked.StatusCode != http.StatusNoContent {
 		t.Fatalf("revoke key status = %d, body = %s", revoked.StatusCode, readBody(t, revoked))
 	}
@@ -356,7 +324,7 @@ func TestHubPageDataEndpointsAndAPIKeyLifecycle(t *testing.T) {
 	listed.Body.Close()
 	found := false
 	for _, item := range keys {
-		if item.ID == key.ID {
+		if item.ID == "key_prod_31" {
 			found = item.Status == "已撤销"
 		}
 	}

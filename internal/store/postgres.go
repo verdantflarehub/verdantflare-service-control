@@ -26,6 +26,7 @@ type persistedState struct {
 	Sessions      map[string]domain.ExperienceSession `json:"sessions"`
 	APIKeys       map[string]persistedAPIKey          `json:"apiKeys"`
 	Models        []domain.Model                      `json:"models"`
+	PublicModels  map[string]domain.PublicModel       `json:"publicModels"`
 	Tasks         []domain.APITask                    `json:"tasks"`
 	Members       map[string][]domain.Member          `json:"members"`
 	Billing       map[string]domain.BillingSummary    `json:"billing"`
@@ -40,7 +41,7 @@ type persistedAPIKey struct {
 	SecretHash [32]byte `json:"secretHash"`
 }
 
-func OpenPostgres(databaseURL string, maxOpen, maxIdle int, now time.Time) (*Postgres, error) {
+func OpenPostgres(databaseURL string, maxOpen, maxIdle int, _ time.Time) (*Postgres, error) {
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
@@ -55,7 +56,7 @@ func OpenPostgres(databaseURL string, maxOpen, maxIdle int, now time.Time) (*Pos
 		_ = db.Close()
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
-	seed, err := encodeMemory(NewMemorySeeded(now))
+	seed, err := encodeMemory(NewMemoryBootstrap())
 	if err != nil {
 		_ = db.Close()
 		return nil, err
@@ -119,7 +120,7 @@ func encodeMemory(m *Memory) ([]byte, error) {
 	}
 	raw, err := json.Marshal(persistedState{
 		Users: m.users, Organizations: m.organizations, Apps: m.apps, Entitlements: m.entitlements,
-		Sessions: m.sessions, APIKeys: keys, Models: m.models, Tasks: m.tasks,
+		Sessions: m.sessions, APIKeys: keys, Models: m.models, PublicModels: m.publicModels, Tasks: m.tasks,
 		Members: m.members, Billing: m.billing, Releases: m.releases, OpsOrgs: m.opsOrgs,
 	})
 	if err != nil {
@@ -145,7 +146,7 @@ func decodeMemory(raw []byte) (*Memory, error) {
 	return &Memory{
 		users: state.Users, organizations: state.Organizations, apps: state.Apps,
 		entitlements: state.Entitlements, sessions: state.Sessions, apiKeys: keys,
-		models: state.Models, tasks: state.Tasks, members: state.Members, billing: state.Billing,
+		models: state.Models, publicModels: state.PublicModels, tasks: state.Tasks, members: state.Members, billing: state.Billing,
 		releases: state.Releases, opsOrgs: state.OpsOrgs,
 	}, nil
 }

@@ -22,11 +22,33 @@ type Memory struct {
 	sessions      map[string]domain.ExperienceSession
 	apiKeys       map[string]domain.APIKey
 	models        []domain.Model
+	publicModels  map[string]domain.PublicModel
 	tasks         []domain.APITask
 	members       map[string][]domain.Member
 	billing       map[string]domain.BillingSummary
 	releases      []domain.Release
 	opsOrgs       []domain.OperationsOrganization
+}
+
+// NewMemoryBootstrap creates only the operational identity needed to provision
+// real organizations. Catalog, metering, billing and experience data start empty.
+func NewMemoryBootstrap() *Memory {
+	const organizationID = "org_verdantflare"
+	const adminSubject = "00000000-0000-4000-8000-000000000001"
+	return &Memory{
+		users: map[string]domain.CenterUser{
+			adminSubject: {
+				LoginSubject: adminSubject, CenterUserID: "cu_01HUB7C9Q", DisplayName: "管理员",
+				Email: "admin@verdantflarehub.com", ActiveOrganizationID: organizationID,
+				Memberships: []domain.Membership{{OrganizationID: organizationID, Roles: []string{"organization_admin", "app_ops_admin", "customer_success_admin", "api_ops_admin"}}},
+			},
+		},
+		organizations: map[string]domain.Organization{organizationID: {OrganizationID: organizationID, Name: "VerdantFlare", ShortName: "VF", EntitlementVersion: 1, Status: "正常"}},
+		apps:          map[string]domain.App{}, entitlements: map[string]map[string]bool{organizationID: {}},
+		sessions: map[string]domain.ExperienceSession{}, apiKeys: map[string]domain.APIKey{},
+		models: []domain.Model{}, publicModels: map[string]domain.PublicModel{}, tasks: []domain.APITask{}, members: map[string][]domain.Member{},
+		billing: map[string]domain.BillingSummary{}, releases: []domain.Release{}, opsOrgs: []domain.OperationsOrganization{},
+	}
 }
 
 func NewMemorySeeded(now time.Time) *Memory {
@@ -365,7 +387,7 @@ func (m *Memory) RevokeAPIKey(_ context.Context, organizationID, keyID string) e
 func (m *Memory) ListModels(_ context.Context, _ string) ([]domain.Model, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return append([]domain.Model(nil), m.models...), nil
+	return append([]domain.Model{}, m.models...), nil
 }
 
 func (m *Memory) ListAPITasks(_ context.Context, organizationID string) ([]domain.APITask, error) {
@@ -391,7 +413,7 @@ func (m *Memory) Usage(_ context.Context, organizationID string) (domain.UsageSu
 	if billing.APIBudget > 0 {
 		percentage = float64(billing.APIUsed) / float64(billing.APIBudget) * 100
 	}
-	return domain.UsageSummary{Budget: billing.APIBudget, Used: billing.APIUsed, Remaining: billing.APIBudget - billing.APIUsed, Percentage: percentage, ByModel: map[string]int{"verdantflare-sd2": 52, "glm-5-2": 23, "deepseek-v4-pro": 16, "other": 9}}, nil
+	return domain.UsageSummary{Budget: billing.APIBudget, Used: billing.APIUsed, Remaining: billing.APIBudget - billing.APIUsed, Percentage: percentage, ByModel: map[string]int{}}, nil
 }
 
 func (m *Memory) ListMembers(_ context.Context, organizationID string) ([]domain.Member, error) {
@@ -460,7 +482,7 @@ func (m *Memory) ListOperationsOrganizations(_ context.Context) ([]domain.Operat
 				appCount++
 			}
 		}
-		result = append(result, domain.OperationsOrganization{ID: id, Name: organization.Name, Plan: organization.Plan, Members: len(m.membersForLocked(id)), Apps: appCount, APIUsage: fmt.Sprintf("%d 点", m.billing[id].APIUsed), Expires: "—", Status: organization.Status})
+		result = append(result, domain.OperationsOrganization{ID: id, Name: organization.Name, Plan: organization.Plan, Members: len(m.membersForLocked(id)), Apps: appCount, APIUsage: "未接入", Expires: "—", Status: organization.Status})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result, nil

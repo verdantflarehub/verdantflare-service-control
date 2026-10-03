@@ -28,12 +28,32 @@ func TestManagedAppSurvivesPostgresReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixture, err := encodeMemory(NewMemorySeeded(time.Now().UTC()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.ExecContext(ctx, `UPDATE control_repository_state SET state=$1 WHERE singleton=TRUE`, fixture); err != nil {
+		t.Fatal(err)
+	}
 	id := fmt.Sprintf("persistence-%d", time.Now().UnixNano())
 	_, err = first.CreateManagedApp(ctx, domain.App{ID: id, Name: "Persistence Demo", Version: "0.1.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = first.UpdateManagedApp(ctx, id, domain.App{Name: "Persistence Demo", Version: "0.1.0", Channel: "Preview"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = first.UpdateManagedApp(ctx, id, domain.App{Name: "Persistence Demo", Version: "0.1.1", Channel: "Preview", PublicVisible: true, Developer: "Verified Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelID := fmt.Sprintf("catalog-%d", time.Now().UnixNano())
+	_, err = first.CreateManagedModel(ctx, domain.PublicModel{ID: modelID, Name: "Catalog Persistence", Provider: "Provider", Summary: "Reviewed", Categories: []string{"文本生成"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = first.UpdateManagedModel(ctx, modelID, domain.PublicModel{ID: modelID, Name: "Catalog Persistence", Provider: "Provider", Summary: "Reviewed", Categories: []string{"文本生成"}, InputPrice: "12", PriceUnit: "点/百万 tokens", PublicVisible: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +92,16 @@ func TestManagedAppSurvivesPostgresReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.Close()
+	catalog, err := second.PublicCatalog(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Models) != 1 || catalog.Models[0].ID != modelID {
+		t.Fatalf("public model did not survive reopen: %+v", catalog.Models)
+	}
+	if len(catalog.Apps) != 1 || catalog.Apps[0].ID != id || catalog.Apps[0].Version != "0.1.1" {
+		t.Fatalf("public app did not survive reopen: %+v", catalog.Apps)
+	}
 	app, err := second.ManagedApp(ctx, id)
 	if err != nil || app.App.Channel != "Preview" {
 		t.Fatalf("reloaded app = %+v, error = %v", app, err)

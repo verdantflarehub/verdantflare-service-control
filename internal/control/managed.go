@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"net/mail"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -14,16 +15,23 @@ import (
 var appIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
 
 type ManagedAppInput struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Category string `json:"category"`
-	Summary  string `json:"summary"`
-	Version  string `json:"version"`
-	GPU      string `json:"gpu"`
-	Duration string `json:"duration"`
-	Icon     string `json:"icon"`
-	Tone     string `json:"tone"`
-	Channel  string `json:"channel"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Category      string `json:"category"`
+	Summary       string `json:"summary"`
+	Version       string `json:"version"`
+	GPU           string `json:"gpu"`
+	Duration      string `json:"duration"`
+	Icon          string `json:"icon"`
+	Tone          string `json:"tone"`
+	Channel       string `json:"channel"`
+	Developer     string `json:"developer"`
+	Description   string `json:"description"`
+	Memory        string `json:"memory"`
+	Disk          string `json:"disk"`
+	CPU           string `json:"cpu"`
+	PublicIconURL string `json:"publicIconUrl"`
+	PublicVisible bool   `json:"publicVisible"`
 }
 
 type CreateManagedOrganizationInput struct {
@@ -62,6 +70,12 @@ func validateManagedApp(input ManagedAppInput) error {
 	if !slices.Contains([]string{"Candidate", "Preview", "Stable", "Paused"}, input.Channel) {
 		return domain.NewError(400, "channel_invalid", "不支持的发布通道")
 	}
+	if input.PublicIconURL != "" {
+		parsed, err := url.Parse(input.PublicIconURL)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+			return domain.NewError(400, "icon_url_invalid", "公开图标须为 HTTPS URL")
+		}
+	}
 	return nil
 }
 
@@ -73,7 +87,7 @@ func appFromInput(input ManagedAppInput) domain.App {
 	if tone == "" {
 		tone = "mint"
 	}
-	return domain.App{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), Category: strings.TrimSpace(input.Category), Summary: strings.TrimSpace(input.Summary), Version: strings.TrimSpace(input.Version), GPU: strings.TrimSpace(input.GPU), Duration: strings.TrimSpace(input.Duration), Icon: icon, Tone: tone, Channel: input.Channel}
+	return domain.App{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), Category: strings.TrimSpace(input.Category), Summary: strings.TrimSpace(input.Summary), Version: strings.TrimSpace(input.Version), GPU: strings.TrimSpace(input.GPU), Duration: strings.TrimSpace(input.Duration), Icon: icon, Tone: tone, Channel: input.Channel, Developer: strings.TrimSpace(input.Developer), Description: strings.TrimSpace(input.Description), Memory: strings.TrimSpace(input.Memory), Disk: strings.TrimSpace(input.Disk), CPU: strings.TrimSpace(input.CPU), PublicIconURL: strings.TrimSpace(input.PublicIconURL), PublicVisible: input.PublicVisible}
 }
 
 func (s *Service) CreateManagedApp(ctx context.Context, subject string, input ManagedAppInput) (domain.ManagedApp, error) {
@@ -82,6 +96,7 @@ func (s *Service) CreateManagedApp(ctx context.Context, subject string, input Ma
 	}
 	input.ID = strings.TrimSpace(input.ID)
 	input.Channel = "Candidate"
+	input.PublicVisible = false
 	if !appIDPattern.MatchString(input.ID) {
 		return domain.ManagedApp{}, domain.NewError(400, "app_id_invalid", "应用 ID 须为 2–63 位小写字母、数字或连字符")
 	}
@@ -104,6 +119,9 @@ func (s *Service) UpdateManagedApp(ctx context.Context, subject, id string, inpu
 	}
 	if err := validateManagedApp(input); err != nil {
 		return domain.ManagedApp{}, err
+	}
+	if input.PublicVisible && !slices.Contains([]string{"Preview", "Stable"}, input.Channel) {
+		return domain.ManagedApp{}, domain.NewError(400, "public_app_unpublished", "仅 Preview 或 Stable 应用可公开展示")
 	}
 	return s.repository.UpdateManagedApp(ctx, id, appFromInput(input))
 }

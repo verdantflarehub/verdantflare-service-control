@@ -41,7 +41,7 @@ func main() {
 		closeRepository = postgresRepository.Close
 		storeName = "postgres"
 	} else {
-		repository = store.NewMemorySeeded(time.Now().UTC())
+		repository = store.NewMemoryBootstrap()
 	}
 	if closeRepository != nil {
 		defer func() {

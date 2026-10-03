@@ -29,7 +29,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("CONTROL_TRUST_AUTH_HEADERS: %w", err)
 	}
 
-	devSubject := env("CONTROL_DEV_LOGIN_SUBJECT", "logto_01vf9k2")
+	devSubject := env("CONTROL_DEV_LOGIN_SUBJECT", "00000000-0000-4000-8000-000000000001")
 	if environment == "production" && devSubject != "" {
 		return Config{}, fmt.Errorf("CONTROL_DEV_LOGIN_SUBJECT must be empty in production")
 	}

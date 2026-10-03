@@ -42,28 +42,68 @@ type CenterContext struct {
 }
 
 type Overview struct {
-	Organization       Organization `json:"organization"`
-	AvailableApps      int          `json:"availableApps"`
-	PreviewApps        int          `json:"previewApps"`
-	ExperienceCredits  int          `json:"experienceCredits"`
-	RunningSessions    int          `json:"runningSessions"`
-	APICredits         int          `json:"apiCredits"`
-	RunningAPITasks    int          `json:"runningApiTasks"`
-	APIUsagePercentage float64      `json:"apiUsagePercentage"`
+	Organization  Organization `json:"organization"`
+	AvailableApps int          `json:"availableApps"`
+	PreviewApps   int          `json:"previewApps"`
 }
 
 type App struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Category string `json:"category"`
-	Summary  string `json:"summary"`
-	Version  string `json:"version"`
-	Channel  string `json:"channel"`
-	Status   string `json:"status"`
-	Tone     string `json:"tone"`
-	Icon     string `json:"icon"`
-	GPU      string `json:"gpu"`
-	Duration string `json:"duration"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Category      string `json:"category"`
+	Summary       string `json:"summary"`
+	Version       string `json:"version"`
+	Channel       string `json:"channel"`
+	Status        string `json:"status"`
+	Tone          string `json:"tone"`
+	Icon          string `json:"icon"`
+	GPU           string `json:"gpu"`
+	Duration      string `json:"duration"`
+	Developer     string `json:"developer,omitempty"`
+	Description   string `json:"description,omitempty"`
+	Memory        string `json:"memory,omitempty"`
+	Disk          string `json:"disk,omitempty"`
+	CPU           string `json:"cpu,omitempty"`
+	PublicIconURL string `json:"publicIconUrl,omitempty"`
+	PublicVisible bool   `json:"publicVisible"`
+}
+
+// PublicModel contains editorial, public-facing model facts. It is not a
+// gateway entitlement, routing, metering or billing record.
+type PublicModel struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Provider      string   `json:"provider"`
+	Summary       string   `json:"summary"`
+	Categories    []string `json:"categories"`
+	Context       string   `json:"context,omitempty"`
+	MaxInput      string   `json:"maxInput,omitempty"`
+	MaxOutput     string   `json:"maxOutput,omitempty"`
+	InputPrice    string   `json:"inputPrice,omitempty"`
+	OutputPrice   string   `json:"outputPrice,omitempty"`
+	CachePrice    string   `json:"cachePrice,omitempty"`
+	PriceUnit     string   `json:"priceUnit,omitempty"`
+	PublicVisible bool     `json:"publicVisible"`
+}
+
+type PublicCatalog struct {
+	Models []PublicModel `json:"models"`
+	Apps   []PublicApp   `json:"apps"`
+}
+
+type PublicApp struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Summary     string `json:"summary"`
+	Version     string `json:"version"`
+	Developer   string `json:"developer,omitempty"`
+	Description string `json:"description,omitempty"`
+	Memory      string `json:"memory,omitempty"`
+	Disk        string `json:"disk,omitempty"`
+	CPU         string `json:"cpu,omitempty"`
+	GPU         string `json:"gpu,omitempty"`
+	IconURL     string `json:"iconUrl,omitempty"`
 }
 
 type ExperienceSession struct {

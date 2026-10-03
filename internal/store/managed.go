@@ -12,7 +12,7 @@ import (
 func appStatus(channel string) string {
 	switch channel {
 	case "Preview":
-		return "可体验"
+		return "预览发布"
 	case "Stable":
 		return "可用"
 	case "Paused":
