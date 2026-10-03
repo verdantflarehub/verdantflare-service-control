@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  VERSION: ${{ github.ref == 'refs/heads/dev' && 'service-control-v1.0.0-dev.1' || 'service-control-v1.0.0' }}
+  VERSION: ${{ github.ref == 'refs/heads/dev' && 'service-control-v1.0.0-dev.1' || 'service-control-v1.1.0' }}
 
 concurrency:
   group: verdantflare-service-control-release
@@ -113,7 +113,7 @@ jobs:
 
       - name: Update Service Control deployment
         run: |
-          image="registry.cn-qingdao.aliyuncs.com/wod/verdantflare:${VERSION}-${GITHUB_SHA}"
+          image="registry.cn-qingdao.aliyuncs.com/wod/verdantflare:${VERSION}"
           kubectl set image deployment/verdantflare-service-control verdantflare-service-control="$image"
           kubectl rollout status deployment/verdantflare-service-control --timeout=5m
           kubectl get deployment/verdantflare-service-control -o jsonpath='{.spec.template.spec.containers[?(@.name=="verdantflare-service-control")].image}{"\n"}'
