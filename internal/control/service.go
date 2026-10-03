@@ -305,17 +305,7 @@ func (s *Service) InviteMember(ctx context.Context, subject string, input Invite
 	if !hasAnyRole(roles, "organization_admin") {
 		return domain.Member{}, domain.NewError(403, "member_invite_forbidden", "当前角色不能邀请成员")
 	}
-	address, err := mail.ParseAddress(strings.TrimSpace(input.Email))
-	if err != nil {
-		return domain.Member{}, domain.NewError(400, "member_email_invalid", "成员邮箱格式不正确")
-	}
-	rolesAllowed := []string{"成员", "开发者", "财务查看者", "组织管理员"}
-	if !slices.Contains(rolesAllowed, input.Role) {
-		return domain.Member{}, domain.NewError(400, "member_role_invalid", "不支持的组织角色")
-	}
-	local := strings.Split(address.Address, "@")[0]
-	member := domain.Member{Name: local, Email: strings.ToLower(address.Address), Role: input.Role, Joined: "等待接受", Status: "待邀请", Avatar: strings.ToUpper(string([]rune(local)[0]))}
-	return s.repository.AddMember(ctx, organization.OrganizationID, member)
+	return s.createMember(ctx, organization.OrganizationID, input)
 }
 
 func (s *Service) Billing(ctx context.Context, subject string) (domain.BillingSummary, error) {

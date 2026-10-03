@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"net/url"
 	"os"
@@ -45,6 +46,23 @@ func TestManagedAppSurvivesPostgresReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	memberEmail := fmt.Sprintf("member-%d@example.test", time.Now().UnixNano())
+	member, err := first.AddMember(ctx, "org_northshore", domain.Member{Email: memberEmail, Name: "Persistence Member", Role: "成员", Status: "待邀请"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.UpdateMember(ctx, "org_northshore", member.ID, "开发者", "已取消", "support"); err != nil {
+		t.Fatal(err)
+	}
+	boundSubject := "00000000-0000-4000-8000-000000000001"
+	if _, err := first.UpdateMember(ctx, "org_verdantflare", boundSubject, "开发者", "停用", "support"); err != nil {
+		t.Fatal(err)
+	}
+	keyHash := sha256.Sum256([]byte("postgres-test-only"))
+	keyID := fmt.Sprintf("key-persistence-%d", time.Now().UnixNano())
+	if _, err := first.CreateAPIKey(ctx, "org_northshore", domain.APIKey{ID: keyID, Name: "Test key", Prefix: "vf_test_••••", SecretHash: keyHash}); err != nil {
+		t.Fatal(err)
+	}
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -70,5 +88,30 @@ func TestManagedAppSurvivesPostgresReopen(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("published and granted app missing after PostgreSQL reopen")
+	}
+	members, err := second.ListMembers(ctx, "org_northshore")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found = false
+	for _, item := range members {
+		found = found || item.ID == member.ID && item.Role == "开发者" && item.Status == "已取消"
+	}
+	if !found {
+		t.Fatal("managed member update missing after PostgreSQL reopen")
+	}
+	if _, err := second.SetActiveOrganization(ctx, boundSubject, "org_verdantflare"); err == nil {
+		t.Fatal("disabled organization membership regained access after PostgreSQL reopen")
+	}
+	keys, err := second.ListAPIKeys(ctx, "org_northshore")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found = false
+	for _, item := range keys {
+		found = found || item.ID == keyID && item.SecretHash == keyHash
+	}
+	if !found {
+		t.Fatal("API key verifier missing after PostgreSQL reopen")
 	}
 }

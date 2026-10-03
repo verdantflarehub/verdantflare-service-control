@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"net/mail"
 	"regexp"
 	"slices"
 	"strings"
@@ -32,6 +33,11 @@ type CreateManagedOrganizationInput struct {
 }
 
 type UpdateManagedOrganizationInput struct {
+	Name                       string   `json:"name"`
+	ShortName                  string   `json:"shortName"`
+	DefaultRegion              string   `json:"defaultRegion"`
+	Industry                   string   `json:"industry"`
+	BillingEmail               string   `json:"billingEmail"`
 	Plan                       string   `json:"plan"`
 	Status                     string   `json:"status"`
 	AppIDs                     []string `json:"appIds"`
@@ -131,5 +137,21 @@ func (s *Service) UpdateManagedOrganization(ctx context.Context, subject, id str
 	if !slices.Contains([]string{"Pilot", "Studio", "Enterprise"}, input.Plan) || !slices.Contains([]string{"正常", "冻结"}, input.Status) || input.AppIDs == nil || input.ExpectedEntitlementVersion < 1 {
 		return domain.ManagedOrganization{}, domain.NewError(400, "organization_update_invalid", "套餐、状态、权益或版本无效")
 	}
-	return s.repository.UpdateManagedOrganization(ctx, id, domain.Organization{Plan: input.Plan, Status: input.Status}, input.AppIDs, input.ExpectedEntitlementVersion)
+	input.Name = strings.TrimSpace(input.Name)
+	input.ShortName = strings.TrimSpace(input.ShortName)
+	input.Industry = strings.TrimSpace(input.Industry)
+	input.BillingEmail = strings.TrimSpace(input.BillingEmail)
+	if input.Name != "" && utf8.RuneCountInString(input.Name) < 2 {
+		return domain.ManagedOrganization{}, domain.NewError(400, "organization_name_invalid", "组织名称至少需要 2 个字符")
+	}
+	if input.DefaultRegion != "" && !slices.Contains([]string{"cn-east-1", "cn-north-1"}, input.DefaultRegion) {
+		return domain.ManagedOrganization{}, domain.NewError(400, "organization_region_invalid", "默认区域无效")
+	}
+	if input.BillingEmail != "" {
+		address, err := mail.ParseAddress(input.BillingEmail)
+		if err != nil || address.Name != "" {
+			return domain.ManagedOrganization{}, domain.NewError(400, "billing_email_invalid", "账单邮箱格式不正确")
+		}
+	}
+	return s.repository.UpdateManagedOrganization(ctx, id, domain.Organization{Name: input.Name, ShortName: input.ShortName, DefaultRegion: input.DefaultRegion, Industry: input.Industry, BillingEmail: input.BillingEmail, Plan: input.Plan, Status: input.Status}, input.AppIDs, input.ExpectedEntitlementVersion)
 }

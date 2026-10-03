@@ -106,7 +106,7 @@ func (m *Memory) managedOrganizationLocked(id string) (domain.ManagedOrganizatio
 	if !exists {
 		return domain.ManagedOrganization{}, domain.NewError(404, "organization_not_found", "组织不存在")
 	}
-	result := domain.ManagedOrganization{Organization: organization, Apps: []domain.App{}, AppIDs: []string{}, Members: append([]domain.Member{}, m.members[id]...)}
+	result := domain.ManagedOrganization{Organization: organization, Apps: []domain.App{}, AppIDs: []string{}, Members: m.membersForLocked(id)}
 	for _, app := range m.apps {
 		if !published(app) {
 			continue
@@ -167,6 +167,21 @@ func (m *Memory) UpdateManagedOrganization(_ context.Context, id string, update 
 		entitlements[appID] = true
 	}
 	organization.Plan, organization.Status = update.Plan, update.Status
+	if update.Name != "" {
+		organization.Name = update.Name
+	}
+	if update.ShortName != "" {
+		organization.ShortName = update.ShortName
+	}
+	if update.DefaultRegion != "" {
+		organization.DefaultRegion = update.DefaultRegion
+	}
+	if update.Industry != "" {
+		organization.Industry = update.Industry
+	}
+	if update.BillingEmail != "" {
+		organization.BillingEmail = update.BillingEmail
+	}
 	organization.EntitlementVersion++
 	m.organizations[id] = organization
 	m.entitlements[id] = entitlements

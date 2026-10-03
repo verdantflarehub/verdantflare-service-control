@@ -14,6 +14,7 @@ type CenterUser struct {
 type Membership struct {
 	OrganizationID string   `json:"organizationId"`
 	Roles          []string `json:"roles"`
+	Status         string   `json:"status,omitempty"`
 }
 
 type Organization struct {
@@ -116,12 +117,14 @@ type APITask struct {
 }
 
 type Member struct {
-	Name   string `json:"name"`
-	Email  string `json:"email"`
-	Role   string `json:"role"`
-	Joined string `json:"joined"`
-	Status string `json:"status"`
-	Avatar string `json:"avatar"`
+	ID           string `json:"id,omitempty"`
+	CenterUserID string `json:"centerUserId,omitempty"`
+	Name         string `json:"name"`
+	Email        string `json:"email"`
+	Role         string `json:"role"`
+	Joined       string `json:"joined"`
+	Status       string `json:"status"`
+	Avatar       string `json:"avatar"`
 }
 
 type BillingSummary struct {

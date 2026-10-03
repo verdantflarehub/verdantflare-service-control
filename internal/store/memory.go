@@ -135,6 +135,9 @@ func (m *Memory) centerContextLocked(subject string) (domain.CenterContext, erro
 	}
 	organizations := make([]domain.Organization, 0, len(user.Memberships))
 	for _, membership := range user.Memberships {
+		if membership.Status == "停用" {
+			continue
+		}
 		organization, exists := m.organizations[membership.OrganizationID]
 		if !exists {
 			continue
@@ -142,7 +145,14 @@ func (m *Memory) centerContextLocked(subject string) (domain.CenterContext, erro
 		organization.Roles = append([]string(nil), membership.Roles...)
 		organizations = append(organizations, organization)
 	}
-	return domain.CenterContext{CenterUserID: user.CenterUserID, LoginSubject: user.LoginSubject, DisplayName: user.DisplayName, Email: user.Email, Organizations: organizations, ActiveOrganizationID: user.ActiveOrganizationID}, nil
+	activeID := user.ActiveOrganizationID
+	if membership, ok := membershipFor(user, activeID); !ok || membership.Status == "停用" {
+		activeID = ""
+		if len(organizations) > 0 {
+			activeID = organizations[0].OrganizationID
+		}
+	}
+	return domain.CenterContext{CenterUserID: user.CenterUserID, LoginSubject: user.LoginSubject, DisplayName: user.DisplayName, Email: user.Email, Organizations: organizations, ActiveOrganizationID: activeID}, nil
 }
 
 func (m *Memory) SetActiveOrganization(_ context.Context, subject, organizationID string) (domain.CenterContext, error) {
@@ -152,7 +162,7 @@ func (m *Memory) SetActiveOrganization(_ context.Context, subject, organizationI
 	if !ok {
 		return domain.CenterContext{}, domain.NewError(403, "center_user_not_found", "登录主体尚未绑定 Center User")
 	}
-	if _, ok := membershipFor(user, organizationID); !ok {
+	if membership, ok := membershipFor(user, organizationID); !ok || membership.Status == "停用" {
 		return domain.CenterContext{}, domain.NewError(403, "organization_forbidden", "不能访问该组织")
 	}
 	user.ActiveOrganizationID = organizationID
@@ -167,11 +177,20 @@ func (m *Memory) ActiveOrganization(_ context.Context, subject string) (domain.O
 	if !ok {
 		return domain.Organization{}, nil, "", domain.NewError(403, "center_user_not_found", "登录主体尚未绑定 Center User")
 	}
-	membership, ok := membershipFor(user, user.ActiveOrganizationID)
-	if !ok {
+	activeID := user.ActiveOrganizationID
+	membership, ok := membershipFor(user, activeID)
+	if !ok || membership.Status == "停用" {
+		for _, candidate := range user.Memberships {
+			if candidate.Status != "停用" {
+				activeID, membership, ok = candidate.OrganizationID, candidate, true
+				break
+			}
+		}
+	}
+	if !ok || membership.Status == "停用" {
 		return domain.Organization{}, nil, "", domain.NewError(403, "organization_forbidden", "当前组织不可访问")
 	}
-	organization, ok := m.organizations[user.ActiveOrganizationID]
+	organization, ok := m.organizations[activeID]
 	if !ok {
 		return domain.Organization{}, nil, "", domain.NewError(404, "organization_not_found", "组织不存在")
 	}
@@ -313,6 +332,9 @@ func (m *Memory) ListAPIKeys(_ context.Context, organizationID string) ([]domain
 	result := make([]domain.APIKey, 0)
 	for _, key := range m.apiKeys {
 		if key.OrganizationID == organizationID {
+			if key.Status == "有效" && key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now().UTC()) {
+				key.Status = "已过期"
+			}
 			result = append(result, key)
 		}
 	}
@@ -375,16 +397,32 @@ func (m *Memory) Usage(_ context.Context, organizationID string) (domain.UsageSu
 func (m *Memory) ListMembers(_ context.Context, organizationID string) ([]domain.Member, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return append([]domain.Member(nil), m.members[organizationID]...), nil
+	if _, ok := m.organizations[organizationID]; !ok {
+		return nil, domain.NewError(404, "organization_not_found", "组织不存在")
+	}
+	return m.membersForLocked(organizationID), nil
 }
 
 func (m *Memory) AddMember(_ context.Context, organizationID string, member domain.Member) (domain.Member, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if _, ok := m.organizations[organizationID]; !ok {
+		return domain.Member{}, domain.NewError(404, "organization_not_found", "组织不存在")
+	}
 	for _, existing := range m.members[organizationID] {
-		if strings.EqualFold(existing.Email, member.Email) {
+		if strings.EqualFold(existing.Email, member.Email) && existing.Status != "已取消" {
 			return domain.Member{}, domain.NewError(409, "member_exists", "该邮箱已在组织中或已有待处理邀请")
 		}
+	}
+	for _, user := range m.users {
+		if strings.EqualFold(user.Email, member.Email) {
+			if _, ok := membershipFor(user, organizationID); ok {
+				return domain.Member{}, domain.NewError(409, "member_exists", "该用户已经属于该组织")
+			}
+		}
+	}
+	if member.ID == "" {
+		member.ID = newID("mem")
 	}
 	m.members[organizationID] = append(m.members[organizationID], member)
 	return member, nil
@@ -422,7 +460,7 @@ func (m *Memory) ListOperationsOrganizations(_ context.Context) ([]domain.Operat
 				appCount++
 			}
 		}
-		result = append(result, domain.OperationsOrganization{ID: id, Name: organization.Name, Plan: organization.Plan, Members: len(m.members[id]), Apps: appCount, APIUsage: fmt.Sprintf("%d 点", m.billing[id].APIUsed), Expires: "—", Status: organization.Status})
+		result = append(result, domain.OperationsOrganization{ID: id, Name: organization.Name, Plan: organization.Plan, Members: len(m.membersForLocked(id)), Apps: appCount, APIUsage: fmt.Sprintf("%d 点", m.billing[id].APIUsed), Expires: "—", Status: organization.Status})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result, nil

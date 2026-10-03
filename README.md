@@ -8,9 +8,9 @@ VerdantFlare Hub 的 Go 业务后端。首期采用模块化单体，统一暴�
 - 当前组织切换与服务端角色复核。
 - 按组织权益过滤的应用 Market。
 - Experience Session 创建、并发/额度校验、关闭与清理状态。
-- API Key 创建、范围和有效期校验、撤销；完整 Secret 只返回一次，服务端只保留 SHA-256。
+- API Key 创建、范围和有效期校验、撤销；完整 Secret 只返回一次，SHA-256 校验摘要保存在私有 PostgreSQL 状态中，不进入公开 API JSON。当前 Key 尚未同步到 `verdantflare-api` 网关。
 - 模型目录、任务和用量聚合接口。
-- 组织资料、成员邀请和账单摘要。
+- 组织资料、成员记录、已绑定用户的组织角色／停用状态和账单摘要。
 - 应用 Candidate → Preview 发布、客户组织创建/冻结与应用权益分配；运营操作按当前角色校验并持久化。
 - 成员邀请在本版保存为待接受业务记录，不创建 Login 账号或发送邮件。
 - 统一 JSON 错误、Request ID、安全响应头、请求体限制和优雅退出。
@@ -66,6 +66,7 @@ CONTROL_TRUST_AUTH_HEADERS=true
 | GET | `/api/control/api/usage` | API 用量摘要 |
 | GET/PATCH | `/api/control/settings/organization` | 组织资料 |
 | GET/POST | `/api/control/settings/members` | 成员列表和邀请 |
+| PATCH | `/api/control/settings/members/{id}` | 更新当前组织成员角色和状态 |
 | GET | `/api/control/settings/billing` | 账单摘要 |
 | GET | `/api/control/ops/releases` | 应用发布运营 |
 | GET | `/api/control/ops/organizations` | 客户组织运营 |
@@ -73,6 +74,7 @@ CONTROL_TRUST_AUTH_HEADERS=true
 | GET/PATCH | `/api/control/ops/apps/{id}` | 查看、编辑应用与发布通道，需 `app_ops_admin` |
 | POST | `/api/control/ops/organizations` | 创建无权益客户组织，需 `customer_success_admin` |
 | GET/PATCH | `/api/control/ops/organizations/{id}` | 查看、更新套餐/冻结状态/应用权益，需 `customer_success_admin` |
+| POST/PATCH | `/api/control/ops/organizations/{id}/members[/{memberId}]` | 创建或更新客户组织成员记录，需 `customer_success_admin` |
 
 ## 数据存储
 
@@ -82,7 +84,7 @@ CONTROL_TRUST_AUTH_HEADERS=true
 
 创建的应用默认 `Candidate`，不会出现在客户 Market。运营发布到 `Preview` 后，还需在客户组织详情授权；冻结组织、暂停或退回 Candidate 的应用都不会在 Market 显示。组织权益更新使用 `expectedEntitlementVersion` 检查并发修改，冲突返回 409；未发布应用的已有授权会保留，避免修改套餐时被隐式删除。
 
-首版尚未打通 Login 账号邀请/禁用、邮件投递、Studio/Station 的真实安装与运行，以及模型提供商配置。页面不应把待接受成员记录或体验 Session 记录当作这些能力已生效。
+首版尚未打通 Login 账号邀请/全局禁用、邮件投递、Studio/Station 的真实安装与运行，以及模型提供商配置。现有模型目录、任务、用量和账单仍可能是初始样例；Control API Key 不等于模型网关凭证。页面不应把待接受成员记录或体验 Session 记录当作这些能力已生效。
 
 ## 验证
 
@@ -93,3 +95,5 @@ make build
 ```
 
 持久化回归测试使用独立、可丢弃的 PostgreSQL 数据库。先应用 `migrations/postgres/001_init.sql`，再设置 `CONTROL_TEST_DATABASE_URL` 运行 `go test ./internal/store -run TestManagedAppSurvivesPostgresReopen -v`。
+
+也可在工作区根目录运行 `scripts/tests/hub_control_integration.sh`，自动使用临时 PostgreSQL 容器执行 Control 全量 Go 测试、静态检查与 Hub 构建。脚本只操作自己创建的临时容器和 `control_test` 数据库。

@@ -55,6 +55,7 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("PATCH /api/control/settings/organization", server.updateOrganization)
 	mux.HandleFunc("GET /api/control/settings/members", server.listMembers)
 	mux.HandleFunc("POST /api/control/settings/members", server.inviteMember)
+	mux.HandleFunc("PATCH /api/control/settings/members/{memberID}", server.updateMember)
 	mux.HandleFunc("GET /api/control/settings/billing", server.getBilling)
 
 	mux.HandleFunc("GET /api/control/ops/releases", server.listReleases)
@@ -65,6 +66,8 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("POST /api/control/ops/organizations", server.createManagedOrganization)
 	mux.HandleFunc("GET /api/control/ops/organizations/{organizationID}", server.getManagedOrganization)
 	mux.HandleFunc("PATCH /api/control/ops/organizations/{organizationID}", server.updateManagedOrganization)
+	mux.HandleFunc("POST /api/control/ops/organizations/{organizationID}/members", server.createManagedMember)
+	mux.HandleFunc("PATCH /api/control/ops/organizations/{organizationID}/members/{memberID}", server.updateManagedMember)
 
 	server.handler = server.middleware(mux)
 	return server

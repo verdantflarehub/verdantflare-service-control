@@ -248,6 +248,19 @@ func TestCreateOrganizationAndMemberRecord(t *testing.T) {
 		t.Fatalf("read organization status = %d, body = %s", read.StatusCode, readBody(t, read))
 	}
 	read.Body.Close()
+	modified := request(t, server, http.MethodPatch, "/api/control/ops/organizations/"+organization.Organization.OrganizationID, map[string]any{
+		"name": "客户组织新名称", "shortName": "客户", "defaultRegion": "cn-north-1", "industry": "影视制作", "billingEmail": "billing@example.test",
+		"plan": "Studio", "status": "正常", "appIds": []string{}, "expectedEntitlementVersion": organization.Organization.EntitlementVersion,
+	})
+	if modified.StatusCode != http.StatusOK {
+		t.Fatalf("update organization status = %d, body = %s", modified.StatusCode, readBody(t, modified))
+	}
+	var modifiedOrganization domain.ManagedOrganization
+	decode(t, modified, &modifiedOrganization)
+	modified.Body.Close()
+	if modifiedOrganization.Organization.Name != "客户组织新名称" || modifiedOrganization.Organization.DefaultRegion != "cn-north-1" || modifiedOrganization.Organization.BillingEmail != "billing@example.test" {
+		t.Fatalf("organization fields not updated: %+v", modifiedOrganization.Organization)
+	}
 
 	invited := request(t, server, http.MethodPost, "/api/control/settings/members", map[string]any{"email": "new.member@example.test", "role": "成员"})
 	if invited.StatusCode != http.StatusCreated {
@@ -266,6 +279,89 @@ func TestCreateOrganizationAndMemberRecord(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("saved pending member record missing from list")
+	}
+}
+
+func TestManagedOrganizationMemberWritesAndRoleGuard(t *testing.T) {
+	server := newTestServer(t, testConfig())
+	path := "/api/control/ops/organizations/org_northshore/members"
+	created := request(t, server, http.MethodPost, path, map[string]string{"email": "member@example.test", "role": "成员"})
+	if created.StatusCode != http.StatusCreated {
+		t.Fatalf("create member status = %d, body = %s", created.StatusCode, readBody(t, created))
+	}
+	var member domain.Member
+	decode(t, created, &member)
+	created.Body.Close()
+	if member.ID == "" || member.Status != "待邀请" {
+		t.Fatalf("unexpected pending member: %+v", member)
+	}
+	updated := request(t, server, http.MethodPatch, path+"/"+member.ID, map[string]string{"role": "财务查看者", "status": "已取消"})
+	if updated.StatusCode != http.StatusOK {
+		t.Fatalf("update member status = %d, body = %s", updated.StatusCode, readBody(t, updated))
+	}
+	updated.Body.Close()
+	read := request(t, server, http.MethodGet, "/api/control/ops/organizations/org_northshore", nil)
+	var organization domain.ManagedOrganization
+	decode(t, read, &organization)
+	read.Body.Close()
+	found := false
+	for _, item := range organization.Members {
+		found = found || item.ID == member.ID && item.Role == "财务查看者" && item.Status == "已取消"
+	}
+	if !found {
+		t.Fatal("updated member missing from managed organization")
+	}
+	switched := request(t, server, http.MethodPut, "/api/control/context/active-organization", map[string]string{"organizationId": "org_northshore"})
+	switched.Body.Close()
+	denied := request(t, server, http.MethodPatch, path+"/"+member.ID, map[string]string{"role": "成员", "status": "待邀请"})
+	if denied.StatusCode != http.StatusForbidden {
+		t.Fatalf("role check status = %d, body = %s", denied.StatusCode, readBody(t, denied))
+	}
+	denied.Body.Close()
+}
+
+func TestHubPageDataEndpointsAndAPIKeyLifecycle(t *testing.T) {
+	server := newTestServer(t, testConfig())
+	for _, path := range []string{
+		"/api/control/overview", "/api/control/api/models", "/api/control/market/apps",
+		"/api/control/api-keys", "/api/control/settings/organization", "/api/control/settings/members",
+		"/api/control/settings/billing", "/api/control/ops/releases", "/api/control/ops/organizations",
+	} {
+		response := request(t, server, http.MethodGet, path, nil)
+		if response.StatusCode != http.StatusOK {
+			t.Errorf("GET %s: status = %d, body = %s", path, response.StatusCode, readBody(t, response))
+		}
+		response.Body.Close()
+	}
+	created := request(t, server, http.MethodPost, "/api/control/api-keys", map[string]any{
+		"name": "Hub smoke", "scopes": []string{"models:read", "usage:read"}, "expiresInDays": 30,
+	})
+	if created.StatusCode != http.StatusCreated {
+		t.Fatalf("create key status = %d, body = %s", created.StatusCode, readBody(t, created))
+	}
+	var key control.CreateAPIKeyResult
+	decode(t, created, &key)
+	created.Body.Close()
+	if key.ID == "" || key.Secret == "" {
+		t.Fatalf("created key lacks one-time secret: %+v", key)
+	}
+	revoked := request(t, server, http.MethodDelete, "/api/control/api-keys/"+key.ID, nil)
+	if revoked.StatusCode != http.StatusNoContent {
+		t.Fatalf("revoke key status = %d, body = %s", revoked.StatusCode, readBody(t, revoked))
+	}
+	revoked.Body.Close()
+	listed := request(t, server, http.MethodGet, "/api/control/api-keys", nil)
+	var keys []domain.APIKey
+	decode(t, listed, &keys)
+	listed.Body.Close()
+	found := false
+	for _, item := range keys {
+		if item.ID == key.ID {
+			found = item.Status == "已撤销"
+		}
+	}
+	if !found {
+		t.Fatal("revoked key status not reflected in list")
 	}
 }
 

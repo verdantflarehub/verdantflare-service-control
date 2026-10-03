@@ -24,13 +24,20 @@ type persistedState struct {
 	Apps          map[string]domain.App               `json:"apps"`
 	Entitlements  map[string]map[string]bool          `json:"entitlements"`
 	Sessions      map[string]domain.ExperienceSession `json:"sessions"`
-	APIKeys       map[string]domain.APIKey            `json:"apiKeys"`
+	APIKeys       map[string]persistedAPIKey          `json:"apiKeys"`
 	Models        []domain.Model                      `json:"models"`
 	Tasks         []domain.APITask                    `json:"tasks"`
 	Members       map[string][]domain.Member          `json:"members"`
 	Billing       map[string]domain.BillingSummary    `json:"billing"`
 	Releases      []domain.Release                    `json:"releases"`
 	OpsOrgs       []domain.OperationsOrganization     `json:"operationsOrganizations"`
+}
+
+// Keep the verifier in private repository state while domain.APIKey continues
+// to omit it from every HTTP JSON response.
+type persistedAPIKey struct {
+	domain.APIKey
+	SecretHash [32]byte `json:"secretHash"`
 }
 
 func OpenPostgres(databaseURL string, maxOpen, maxIdle int, now time.Time) (*Postgres, error) {
@@ -106,9 +113,13 @@ func (p *Postgres) mutate(ctx context.Context, operation func(*Memory) error) er
 func encodeMemory(m *Memory) ([]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	keys := make(map[string]persistedAPIKey, len(m.apiKeys))
+	for id, key := range m.apiKeys {
+		keys[id] = persistedAPIKey{APIKey: key, SecretHash: key.SecretHash}
+	}
 	raw, err := json.Marshal(persistedState{
 		Users: m.users, Organizations: m.organizations, Apps: m.apps, Entitlements: m.entitlements,
-		Sessions: m.sessions, APIKeys: m.apiKeys, Models: m.models, Tasks: m.tasks,
+		Sessions: m.sessions, APIKeys: keys, Models: m.models, Tasks: m.tasks,
 		Members: m.members, Billing: m.billing, Releases: m.releases, OpsOrgs: m.opsOrgs,
 	})
 	if err != nil {
@@ -122,9 +133,18 @@ func decodeMemory(raw []byte) (*Memory, error) {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		return nil, fmt.Errorf("decode control repository: %w", err)
 	}
+	keys := make(map[string]domain.APIKey, len(state.APIKeys))
+	for id, persisted := range state.APIKeys {
+		key := persisted.APIKey
+		key.SecretHash = persisted.SecretHash
+		if key.SecretHash == ([32]byte{}) && key.Status == "有效" {
+			key.Status = "需重建"
+		}
+		keys[id] = key
+	}
 	return &Memory{
 		users: state.Users, organizations: state.Organizations, apps: state.Apps,
-		entitlements: state.Entitlements, sessions: state.Sessions, apiKeys: state.APIKeys,
+		entitlements: state.Entitlements, sessions: state.Sessions, apiKeys: keys,
 		models: state.Models, tasks: state.Tasks, members: state.Members, billing: state.Billing,
 		releases: state.Releases, opsOrgs: state.OpsOrgs,
 	}, nil
@@ -244,6 +264,14 @@ func (p *Postgres) ListMembers(ctx context.Context, organizationID string) ([]do
 }
 func (p *Postgres) AddMember(ctx context.Context, organizationID string, member domain.Member) (result domain.Member, err error) {
 	err = p.mutate(ctx, func(m *Memory) error { var e error; result, e = m.AddMember(ctx, organizationID, member); return e })
+	return
+}
+func (p *Postgres) UpdateMember(ctx context.Context, organizationID, memberID, role, status, actorSubject string) (result domain.Member, err error) {
+	err = p.mutate(ctx, func(m *Memory) error {
+		var e error
+		result, e = m.UpdateMember(ctx, organizationID, memberID, role, status, actorSubject)
+		return e
+	})
 	return
 }
 func (p *Postgres) Billing(ctx context.Context, organizationID string) (domain.BillingSummary, error) {

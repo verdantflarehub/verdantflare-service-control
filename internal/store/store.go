@@ -30,6 +30,7 @@ type Repository interface {
 
 	ListMembers(context.Context, string) ([]domain.Member, error)
 	AddMember(context.Context, string, domain.Member) (domain.Member, error)
+	UpdateMember(context.Context, string, string, string, string, string) (domain.Member, error)
 	Billing(context.Context, string) (domain.BillingSummary, error)
 
 	ListReleases(context.Context) ([]domain.Release, error)
