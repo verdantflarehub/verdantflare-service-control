@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  VERSION: ${{ github.ref == 'refs/heads/dev' && 'service-control-v1.5.0-dev.1' || 'service-control-v1.5.0' }}
+  VERSION: ${{ github.ref == 'refs/heads/dev' && 'service-control-v1.5.1-dev.1' || 'service-control-v1.5.1' }}
 
 concurrency:
   group: verdantflare-service-control-release
@@ -112,6 +112,12 @@ jobs:
 
       - name: Update Service Control deployment
         run: |
+          set -eu
+          kubectl --context verdantflare -n verdantflare get secret login-directory-bridge -o json \
+            | jq -e '(.data.TOKEN // "") != ""' >/dev/null
+          kubectl --context verdantflare -n verdantflare patch deployment verdantflare-service-control --type strategic \
+            -p '{"spec":{"template":{"spec":{"containers":[{"name":"verdantflare-service-control","env":[{"name":"CONTROL_LOGIN_DIRECTORY_BASE_URL","value":"http://verdantflare-login-api.verdantflare.svc.cluster.local:8088"},{"name":"CONTROL_LOGIN_DIRECTORY_TOKEN","valueFrom":{"secretKeyRef":{"name":"login-directory-bridge","key":"TOKEN"}}}]}]}}}}'
+          kubectl --context verdantflare -n verdantflare rollout status deployment/verdantflare-service-control --timeout=5m
           image="registry.cn-qingdao.aliyuncs.com/wod/verdantflare:${VERSION}"
           kubectl --context verdantflare -n verdantflare set image deployment/verdantflare-service-control verdantflare-service-control="$image"
           kubectl --context verdantflare -n verdantflare rollout status deployment/verdantflare-service-control --timeout=5m

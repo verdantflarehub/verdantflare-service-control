@@ -35,6 +35,8 @@ type Repository interface {
 	Usage(context.Context, string) (domain.UsageSummary, error)
 
 	ListMembers(context.Context, string) ([]domain.Member, error)
+	BoundLoginSubjects(context.Context) (map[string]bool, error)
+	BindLoginUser(context.Context, string, string, string, string) (domain.Member, error)
 	AddMember(context.Context, string, domain.Member) (domain.Member, error)
 	UpdateMember(context.Context, string, string, string, string, string) (domain.Member, error)
 	Billing(context.Context, string) (domain.BillingSummary, error)

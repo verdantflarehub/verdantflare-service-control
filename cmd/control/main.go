@@ -60,6 +60,14 @@ func main() {
 		}
 	}
 	service := control.NewService(repository, modelGateway)
+	if configuration.LoginDirectoryBaseURL != "" {
+		directory, err := gateway.NewLoginDirectoryClient(configuration.LoginDirectoryBaseURL, configuration.LoginDirectoryToken)
+		if err != nil {
+			logger.Error("invalid Login directory configuration", "error", err)
+			os.Exit(1)
+		}
+		service.SetLoginDirectory(directory)
+	}
 	if configuration.GatewayAdminToken != "" {
 		accountGateway, err := gateway.NewCenterClient(configuration.GatewayBaseURL, configuration.GatewayAdminToken)
 		if err != nil {

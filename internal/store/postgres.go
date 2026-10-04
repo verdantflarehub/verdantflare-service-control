@@ -264,6 +264,21 @@ func (p *Postgres) ListMembers(ctx context.Context, organizationID string) ([]do
 	}
 	return m.ListMembers(ctx, organizationID)
 }
+func (p *Postgres) BoundLoginSubjects(ctx context.Context) (map[string]bool, error) {
+	m, err := p.read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return m.BoundLoginSubjects(ctx)
+}
+func (p *Postgres) BindLoginUser(ctx context.Context, organizationID, subject, email, role string) (result domain.Member, err error) {
+	err = p.mutate(ctx, func(m *Memory) error {
+		var e error
+		result, e = m.BindLoginUser(ctx, organizationID, subject, email, role)
+		return e
+	})
+	return
+}
 func (p *Postgres) AddMember(ctx context.Context, organizationID string, member domain.Member) (result domain.Member, err error) {
 	err = p.mutate(ctx, func(m *Memory) error { var e error; result, e = m.AddMember(ctx, organizationID, member); return e })
 	return

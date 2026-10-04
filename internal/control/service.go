@@ -23,6 +23,7 @@ type Service struct {
 	repository     store.Repository
 	modelGateway   ModelGateway
 	accountGateway GatewayAccounts
+	loginDirectory LoginDirectory
 	modelRunSlots  chan struct{}
 	now            func() time.Time
 }
@@ -43,6 +44,13 @@ type GatewayAccounts interface {
 }
 
 func (s *Service) SetGatewayAccounts(accounts GatewayAccounts) { s.accountGateway = accounts }
+
+type LoginDirectory interface {
+	ListUsers(context.Context, string, string, int) (gateway.LoginDirectoryPage, error)
+	User(context.Context, string) (gateway.LoginDirectoryUser, error)
+}
+
+func (s *Service) SetLoginDirectory(directory LoginDirectory) { s.loginDirectory = directory }
 
 var gatewayRequestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,80}$`)
 

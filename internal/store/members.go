@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"sort"
 	"strings"
 
@@ -33,6 +35,65 @@ func memberRoleKey(label string) string {
 	default:
 		return "member"
 	}
+}
+
+func (m *Memory) BoundLoginSubjects(_ context.Context) (map[string]bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make(map[string]bool, len(m.users))
+	for subject := range m.users {
+		result[subject] = true
+	}
+	return result, nil
+}
+
+func (m *Memory) BindLoginUser(_ context.Context, organizationID, subject, email, role string) (domain.Member, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	organization, exists := m.organizations[organizationID]
+	if !exists {
+		return domain.Member{}, domain.NewError(404, "organization_not_found", "组织不存在")
+	}
+	if organization.Status == "冻结" {
+		return domain.Member{}, domain.NewError(409, "organization_frozen", "组织已冻结")
+	}
+	if existing, exists := m.users[subject]; exists {
+		membership, ok := membershipFor(existing, organizationID)
+		if !ok || memberRole(membership.Roles) != role || membership.Status == "停用" || !strings.EqualFold(existing.Email, email) {
+			return domain.Member{}, domain.NewError(409, "user_already_bound", "用户已有组织关系，请在成员管理中调整")
+		}
+		for _, member := range m.membersForLocked(organizationID) {
+			if member.ID == subject {
+				return member, nil
+			}
+		}
+	}
+	for id, user := range m.users {
+		if id != subject && strings.EqualFold(user.Email, email) {
+			return domain.Member{}, domain.NewError(409, "email_already_bound", "邮箱已绑定其他 Login 用户")
+		}
+	}
+	random := make([]byte, 12)
+	if _, err := rand.Read(random); err != nil {
+		return domain.Member{}, err
+	}
+	local := strings.Split(email, "@")[0]
+	m.users[subject] = domain.CenterUser{CenterUserID: "cu_" + hex.EncodeToString(random), LoginSubject: subject, DisplayName: local,
+		Email: email, ActiveOrganizationID: organizationID,
+		Memberships: []domain.Membership{{OrganizationID: organizationID, Roles: []string{memberRoleKey(role)}, Status: "正常"}}}
+	remaining := m.members[organizationID][:0]
+	for _, member := range m.members[organizationID] {
+		if !strings.EqualFold(member.Email, email) {
+			remaining = append(remaining, member)
+		}
+	}
+	m.members[organizationID] = remaining
+	for _, member := range m.membersForLocked(organizationID) {
+		if member.ID == subject {
+			return member, nil
+		}
+	}
+	return domain.Member{}, domain.NewError(500, "member_bind_failed", "成员绑定失败")
 }
 
 func (m *Memory) membersForLocked(organizationID string) []domain.Member {

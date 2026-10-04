@@ -2,11 +2,14 @@ package control
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"net/mail"
 	"slices"
 	"strings"
 
 	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
+	"github.com/verdantflarehub/verdantflare-service-control/internal/gateway"
 )
 
 type UpdateMemberInput struct {
@@ -15,6 +18,67 @@ type UpdateMemberInput struct {
 }
 
 var memberRoles = []string{"成员", "开发者", "财务查看者", "组织管理员"}
+
+type GuestPage struct {
+	Users      []gateway.LoginDirectoryUser `json:"users"`
+	NextCursor string                       `json:"nextCursor"`
+}
+
+type BindMemberInput struct {
+	LoginUserID string `json:"loginUserId"`
+	Role        string `json:"role"`
+}
+
+func (s *Service) ListGuests(ctx context.Context, subject, cursor, query string, limit int) (GuestPage, error) {
+	if err := s.requireOperationsRole(ctx, subject, "customer_success_admin"); err != nil {
+		return GuestPage{}, err
+	}
+	if s.loginDirectory == nil {
+		return GuestPage{}, domain.NewError(503, "login_directory_unavailable", "Login 用户目录尚未配置")
+	}
+	if limit < 1 || limit > 100 || len(query) > 160 || len(cursor) > 128 {
+		return GuestPage{}, domain.NewError(400, "guest_query_invalid", "游客查询参数无效")
+	}
+	page, err := s.loginDirectory.ListUsers(ctx, cursor, strings.TrimSpace(query), limit)
+	if err != nil {
+		return GuestPage{}, domain.NewError(503, "login_directory_unavailable", "Login 用户目录暂时不可用")
+	}
+	bound, err := s.repository.BoundLoginSubjects(ctx)
+	if err != nil {
+		return GuestPage{}, err
+	}
+	result := GuestPage{Users: make([]gateway.LoginDirectoryUser, 0, len(page.Users)), NextCursor: page.NextCursor}
+	for _, user := range page.Users {
+		if user.ID != "" && user.EmailVerified && user.Status == "active" && !bound[user.ID] {
+			result.Users = append(result.Users, user)
+		}
+	}
+	return result, nil
+}
+
+func (s *Service) BindManagedMember(ctx context.Context, subject, organizationID string, input BindMemberInput) (domain.Member, error) {
+	if err := s.requireOperationsRole(ctx, subject, "customer_success_admin"); err != nil {
+		return domain.Member{}, err
+	}
+	if s.loginDirectory == nil {
+		return domain.Member{}, domain.NewError(503, "login_directory_unavailable", "Login 用户目录尚未配置")
+	}
+	if strings.TrimSpace(input.LoginUserID) == "" || len(input.LoginUserID) > 128 || !slices.Contains(memberRoles, input.Role) {
+		return domain.Member{}, domain.NewError(400, "member_bind_invalid", "用户或组织角色无效")
+	}
+	user, err := s.loginDirectory.User(ctx, input.LoginUserID)
+	if err != nil {
+		var directoryError gateway.LoginDirectoryHTTPError
+		if errors.As(err, &directoryError) && directoryError.Status == http.StatusNotFound {
+			return domain.Member{}, domain.NewError(409, "login_user_ineligible", "Login 用户不存在或已删除")
+		}
+		return domain.Member{}, domain.NewError(503, "login_directory_unavailable", "无法验证 Login 用户")
+	}
+	if user.ID != input.LoginUserID || user.Status != "active" || !user.EmailVerified || user.Email == "" {
+		return domain.Member{}, domain.NewError(409, "login_user_ineligible", "用户未完成邮箱验证或账号已停用")
+	}
+	return s.repository.BindLoginUser(ctx, organizationID, user.ID, user.Email, input.Role)
+}
 
 func (s *Service) createMember(ctx context.Context, organizationID string, input InviteMemberInput) (domain.Member, error) {
 	address, err := mail.ParseAddress(strings.TrimSpace(input.Email))
