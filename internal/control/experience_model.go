@@ -12,8 +12,6 @@ import (
 	"github.com/verdantflarehub/verdantflare-service-control/internal/gateway"
 )
 
-const firstExperienceModel = "deepseek-flash"
-
 type CreateModelExperienceInput struct {
 	RequestID string `json:"requestId"`
 	ModelID   string `json:"modelId"`
@@ -42,7 +40,7 @@ func (s *Service) CreateModelExperienceRun(ctx context.Context, subject string, 
 		return domain.ModelExperienceRun{}, err
 	}
 	input.Prompt = strings.TrimSpace(input.Prompt)
-	if !gatewayRequestIDPattern.MatchString(input.RequestID) || input.ModelID != firstExperienceModel || input.Prompt == "" || utf8.RuneCountInString(input.Prompt) > 2000 {
+	if !gatewayRequestIDPattern.MatchString(input.RequestID) || !appIDPattern.MatchString(input.ModelID) || input.Prompt == "" || utf8.RuneCountInString(input.Prompt) > 2000 {
 		return domain.ModelExperienceRun{}, domain.NewError(400, "experience_request_invalid", "模型、请求 ID 或提示词无效")
 	}
 	existing, found, err := s.repository.FindModelExperienceRunByRequestID(ctx, organization.OrganizationID, input.RequestID)
@@ -67,13 +65,13 @@ func (s *Service) CreateModelExperienceRun(ctx context.Context, subject string, 
 	}
 	available := false
 	for _, item := range published {
-		if item.ID == firstExperienceModel {
+		if item.ID == input.ModelID && item.ExperienceMode == "chat" {
 			available = true
 			break
 		}
 	}
 	if !available {
-		return domain.ModelExperienceRun{}, domain.NewError(503, "experience_model_unavailable", "该模型当前未上架或网关不可用")
+		return domain.ModelExperienceRun{}, domain.NewError(403, "experience_model_disabled", "该模型尚未开放 Hub 在线体验")
 	}
 	balance, err := s.accountGateway.Balance(ctx, organization.OrganizationID)
 	if err != nil {
@@ -106,7 +104,7 @@ func (s *Service) executeModelExperienceRun(run domain.ModelExperienceRun) {
 	defer func() { <-s.modelRunSlots }()
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
-	result, err := s.accountGateway.ExperienceChat(ctx, run.OrganizationID, run.Prompt)
+	result, err := s.accountGateway.ExperienceChat(ctx, run.OrganizationID, run.ModelID, run.Prompt)
 	status, response, errorCode := "completed", result.Response, ""
 	if err != nil {
 		status, response, errorCode = "failed", "", "upstream_rejected"

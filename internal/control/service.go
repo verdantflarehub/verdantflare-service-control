@@ -30,6 +30,7 @@ type Service struct {
 
 type ModelGateway interface {
 	ListModels(context.Context) (map[string]struct{}, error)
+	ListChatModels(context.Context) (map[string]struct{}, error)
 }
 
 type GatewayAccounts interface {
@@ -40,7 +41,7 @@ type GatewayAccounts interface {
 	CreateKey(context.Context, string, string, string, []string, int) (gateway.CenterCreatedKey, error)
 	RevokeKey(context.Context, string, int) error
 	ProbeKey(context.Context, string, int) (gateway.CenterProbe, error)
-	ExperienceChat(context.Context, string, string) (gateway.CenterChatResult, error)
+	ExperienceChat(context.Context, string, string, string) (gateway.CenterChatResult, error)
 }
 
 func (s *Service) SetGatewayAccounts(accounts GatewayAccounts) { s.accountGateway = accounts }
@@ -295,6 +296,7 @@ func (s *Service) ListModels(ctx context.Context, subject string) ([]domain.Mode
 			Type: category, Context: item.Context, Status: "网关已列出",
 			InputPrice: item.InputPrice, OutputPrice: item.OutputPrice,
 			CachePrice: item.CachePrice, PriceUnit: item.PriceUnit,
+			ExperienceMode: item.ExperienceMode,
 		})
 	}
 	return models, nil

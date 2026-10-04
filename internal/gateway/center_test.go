@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -32,6 +33,13 @@ func TestCenterClientUsesAuthenticatedOrganizationPaths(t *testing.T) {
 		case "GET /api/internal/center/organizations/org_alpha/keys/1/probe":
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"ok":true,"reason":"ok","models":["deepseek-flash"],"readOnly":true}}`))
 		case "POST /api/internal/center/organizations/org_alpha/experience/chat-completions":
+			var payload struct {
+				ModelID string `json:"modelId"`
+				Prompt  string `json:"prompt"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil || payload.ModelID != "deepseek-v4-pro" || payload.Prompt != "你好" {
+				t.Errorf("unexpected experience request: %+v %v", payload, err)
+			}
 			_, _ = writer.Write([]byte(`{"choices":[{"message":{"content":"已生成的回答"}}],"usage":{"prompt_tokens":8,"completion_tokens":12,"total_tokens":20}}`))
 		case "POST /api/internal/center/organizations/org_alpha/keys/1/revoke", "PUT /api/internal/center/organizations/org_alpha/status":
 			_, _ = writer.Write([]byte(`{"success":true}`))
@@ -67,7 +75,7 @@ func TestCenterClientUsesAuthenticatedOrganizationPaths(t *testing.T) {
 	if err := client.SetEnabled(ctx, "org_alpha", false); err != nil {
 		t.Fatal(err)
 	}
-	if result, err := client.ExperienceChat(ctx, "org_alpha", "你好"); err != nil || result.Response != "已生成的回答" || result.TotalTokens != 20 {
+	if result, err := client.ExperienceChat(ctx, "org_alpha", "deepseek-v4-pro", "你好"); err != nil || result.Response != "已生成的回答" || result.TotalTokens != 20 {
 		t.Fatalf("experience chat: %+v %v", result, err)
 	}
 	if len(seen) != 8 {

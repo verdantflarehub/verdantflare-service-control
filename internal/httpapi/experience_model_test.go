@@ -18,7 +18,7 @@ import (
 
 func TestModelExperienceHTTPFlow(t *testing.T) {
 	accounts := newAccountGatewayFixture()
-	service := control.NewService(store.NewMemoryBootstrap(), &catalogGateway{models: map[string]struct{}{"deepseek-flash": {}}})
+	service := control.NewService(store.NewMemoryBootstrap(), &catalogGateway{models: map[string]struct{}{"deepseek-flash": {}, "deepseek-v4-pro": {}}, chatModels: map[string]struct{}{"deepseek-flash": {}, "deepseek-v4-pro": {}}})
 	service.SetGatewayAccounts(accounts)
 	server := httptest.NewServer(httpapi.New(config.Config{Environment: "test", DevLoginSubject: "00000000-0000-4000-8000-000000000001"}, service, slog.New(slog.NewTextHandler(io.Discard, nil))))
 	defer server.Close()
@@ -30,6 +30,7 @@ func TestModelExperienceHTTPFlow(t *testing.T) {
 	}
 	created.Body.Close()
 	model.PublicVisible = true
+	model.ExperienceMode = "chat"
 	published := request(t, server, http.MethodPatch, "/api/control/ops/models/deepseek-flash", model)
 	if published.StatusCode != http.StatusOK {
 		t.Fatalf("publish model: %d %s", published.StatusCode, readBody(t, published))
@@ -71,6 +72,9 @@ func TestModelExperienceHTTPFlow(t *testing.T) {
 	if run.Status != "completed" || run.Response != "真实上游响应" || run.TotalTokens != 20 {
 		t.Fatalf("run did not persist a real gateway result: %+v", run)
 	}
+	if accounts.chatModel.Load() != "deepseek-flash" {
+		t.Fatalf("gateway received wrong model: %v", accounts.chatModel.Load())
+	}
 	accounts.balances["org_verdantflare"] = gateway.CenterBalance{Enabled: false, RemainingQuota: 0}
 	retry := request(t, server, http.MethodPost, path, input)
 	if retry.StatusCode != http.StatusAccepted {
@@ -88,6 +92,57 @@ func TestModelExperienceHTTPFlow(t *testing.T) {
 	listed.Body.Close()
 	if len(runs) != 1 || runs[0].ID != run.ID {
 		t.Fatalf("history was not persisted: %+v", runs)
+	}
+	pro := domain.PublicModel{ID: "deepseek-v4-pro", Name: "DeepSeek V4 Pro", Provider: "DeepSeek", Summary: "Text model", Categories: []string{"文本生成"}}
+	createdPro := request(t, server, http.MethodPost, "/api/control/ops/models", pro)
+	if createdPro.StatusCode != http.StatusCreated {
+		t.Fatalf("create second model: %d %s", createdPro.StatusCode, readBody(t, createdPro))
+	}
+	createdPro.Body.Close()
+	pro.ExperienceMode = "chat"
+	unpublishedPro := request(t, server, http.MethodPatch, "/api/control/ops/models/deepseek-v4-pro", pro)
+	if unpublishedPro.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unpublished model enabled experience: %d %s", unpublishedPro.StatusCode, readBody(t, unpublishedPro))
+	}
+	unpublishedPro.Body.Close()
+	pro.ExperienceMode = ""
+	pro.PublicVisible = true
+	publishedPro := request(t, server, http.MethodPatch, "/api/control/ops/models/deepseek-v4-pro", pro)
+	if publishedPro.StatusCode != http.StatusOK {
+		t.Fatalf("publish second model: %d %s", publishedPro.StatusCode, readBody(t, publishedPro))
+	}
+	publishedPro.Body.Close()
+	accounts.balances["org_verdantflare"] = gateway.CenterBalance{Enabled: true, RemainingQuota: 500000}
+	proInput := map[string]string{"requestId": "model_experience_request_003", "modelId": pro.ID, "prompt": "介绍一下自己"}
+	disabled := request(t, server, http.MethodPost, path, proInput)
+	if disabled.StatusCode != http.StatusForbidden || accounts.chatCalls.Load() != 1 {
+		t.Fatalf("closed experience reached gateway: %d calls=%d %s", disabled.StatusCode, accounts.chatCalls.Load(), readBody(t, disabled))
+	}
+	disabled.Body.Close()
+	pro.ExperienceMode = "chat"
+	enabledPro := request(t, server, http.MethodPatch, "/api/control/ops/models/deepseek-v4-pro", pro)
+	if enabledPro.StatusCode != http.StatusOK {
+		t.Fatalf("enable second model: %d %s", enabledPro.StatusCode, readBody(t, enabledPro))
+	}
+	enabledPro.Body.Close()
+	proRunResponse := request(t, server, http.MethodPost, path, proInput)
+	if proRunResponse.StatusCode != http.StatusAccepted {
+		t.Fatalf("submit second model: %d %s", proRunResponse.StatusCode, readBody(t, proRunResponse))
+	}
+	var proRun domain.ModelExperienceRun
+	decode(t, proRunResponse, &proRun)
+	proRunResponse.Body.Close()
+	deadline = time.Now().Add(2 * time.Second)
+	for proRun.Status == "submitting" && time.Now().Before(deadline) {
+		result := request(t, server, http.MethodGet, path+"/"+proRun.ID, nil)
+		decode(t, result, &proRun)
+		result.Body.Close()
+		if proRun.Status == "submitting" {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if proRun.Status != "completed" || proRun.ModelID != pro.ID || accounts.chatModel.Load() != pro.ID {
+		t.Fatalf("second model did not reach gateway unchanged: %+v gateway=%v", proRun, accounts.chatModel.Load())
 	}
 	accounts.balances["org_verdantflare"] = gateway.CenterBalance{Enabled: true, RemainingQuota: 500000}
 	accounts.chatErr = gateway.CenterHTTPError{Status: http.StatusServiceUnavailable}

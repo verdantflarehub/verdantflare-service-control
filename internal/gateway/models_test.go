@@ -14,7 +14,7 @@ func TestModelsClientReadsTokenScopedModelIDs(t *testing.T) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		_, _ = w.Write([]byte(`{"success":true,"data":[{"id":"verdantflare-sd2"},{"id":"deepseek-flash"}]}`))
+		_, _ = w.Write([]byte(`{"success":true,"data":[{"id":"verdantflare-sd2","supported_endpoint_types":["openai-video"]},{"id":"deepseek-flash","supported_endpoint_types":["openai"]}]}`))
 	}))
 	defer server.Close()
 	client, err := NewModelsClient(server.URL, "catalog-token")
@@ -33,6 +33,16 @@ func TestModelsClientReadsTokenScopedModelIDs(t *testing.T) {
 	}
 	if _, ok := models["deepseek-flash"]; !ok {
 		t.Fatal("DeepSeek missing")
+	}
+	chatModels, err := client.ListChatModels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := chatModels["deepseek-flash"]; !ok {
+		t.Fatal("DeepSeek chat endpoint missing")
+	}
+	if _, ok := chatModels["verdantflare-sd2"]; ok {
+		t.Fatal("video model was marked as chat compatible")
 	}
 }
 

@@ -53,7 +53,7 @@ func TestManagedAppSurvivesPostgresReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = first.UpdateManagedModel(ctx, modelID, domain.PublicModel{ID: modelID, Name: "Catalog Persistence", Provider: "Provider", Summary: "Reviewed", Categories: []string{"文本生成"}, InputPrice: "12", PriceUnit: "点/百万 tokens", PublicVisible: true})
+	_, err = first.UpdateManagedModel(ctx, modelID, domain.PublicModel{ID: modelID, Name: "Catalog Persistence", Provider: "Provider", Summary: "Reviewed", Categories: []string{"文本生成"}, InputPrice: "12", PriceUnit: "点/百万 tokens", PublicVisible: true, ExperienceMode: "chat"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestManagedAppSurvivesPostgresReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Models) != 1 || catalog.Models[0].ID != modelID {
+	if len(catalog.Models) != 1 || catalog.Models[0].ID != modelID || catalog.Models[0].ExperienceMode != "chat" {
 		t.Fatalf("public model did not survive reopen: %+v", catalog.Models)
 	}
 	if len(catalog.Apps) != 1 || catalog.Apps[0].ID != id || catalog.Apps[0].Version != "0.1.1" {

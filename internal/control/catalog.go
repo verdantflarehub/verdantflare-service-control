@@ -90,6 +90,12 @@ func (s *Service) ListManagedModels(ctx context.Context, subject string) ([]doma
 }
 
 func validatePublicModel(model domain.PublicModel) error {
+	if model.ExperienceMode != "" && model.ExperienceMode != "chat" {
+		return domain.NewError(400, "experience_mode_invalid", "不支持该模型体验方式")
+	}
+	if model.ExperienceMode != "" && !model.PublicVisible {
+		return domain.NewError(400, "experience_requires_publication", "开启在线体验前必须先上架模型")
+	}
 	if !appIDPattern.MatchString(model.ID) || utf8.RuneCountInString(strings.TrimSpace(model.Name)) < 2 || strings.TrimSpace(model.Provider) == "" || strings.TrimSpace(model.Summary) == "" || len(model.Categories) == 0 {
 		return domain.NewError(400, "public_model_invalid", "模型 ID、名称、提供方、简介与类别不能为空")
 	}
@@ -114,6 +120,9 @@ func (s *Service) CreateManagedModel(ctx context.Context, subject string, model 
 		return domain.PublicModel{}, err
 	}
 	model.ID = strings.TrimSpace(model.ID)
+	if model.ExperienceMode != "" {
+		return domain.PublicModel{}, domain.NewError(400, "experience_requires_publication", "请先创建并上架模型，再单独开放在线体验")
+	}
 	if err := validatePublicModel(model); err != nil {
 		return domain.PublicModel{}, err
 	}
@@ -128,13 +137,22 @@ func (s *Service) UpdateManagedModel(ctx context.Context, subject, id string, mo
 	if err := validatePublicModel(model); err != nil {
 		return domain.PublicModel{}, err
 	}
-	if model.PublicVisible {
+	if model.PublicVisible || model.ExperienceMode != "" {
 		available, err := s.gatewayModels(ctx)
 		if err != nil {
 			return domain.PublicModel{}, err
 		}
 		if _, ok := available[id]; !ok {
 			return domain.PublicModel{}, domain.NewError(409, "model_gateway_missing", "模型未出现在网关可用列表，不能上架")
+		}
+		if model.ExperienceMode == "chat" {
+			chatModels, err := s.modelGateway.ListChatModels(ctx)
+			if err != nil {
+				return domain.PublicModel{}, domain.NewError(503, "model_gateway_unavailable", "暂时无法核验模型对话端点")
+			}
+			if _, ok := chatModels[id]; !ok {
+				return domain.PublicModel{}, domain.NewError(409, "model_chat_unsupported", "该模型未提供 OpenAI 对话端点，不能开放文本体验")
+			}
 		}
 	}
 	return s.repository.UpdateManagedModel(ctx, id, model)

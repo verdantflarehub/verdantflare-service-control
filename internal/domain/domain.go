@@ -72,19 +72,20 @@ type App struct {
 // PublicModel contains editorial, public-facing model facts. It is not a
 // gateway entitlement, routing, metering or billing record.
 type PublicModel struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Provider      string   `json:"provider"`
-	Summary       string   `json:"summary"`
-	Categories    []string `json:"categories"`
-	Context       string   `json:"context,omitempty"`
-	MaxInput      string   `json:"maxInput,omitempty"`
-	MaxOutput     string   `json:"maxOutput,omitempty"`
-	InputPrice    string   `json:"inputPrice,omitempty"`
-	OutputPrice   string   `json:"outputPrice,omitempty"`
-	CachePrice    string   `json:"cachePrice,omitempty"`
-	PriceUnit     string   `json:"priceUnit,omitempty"`
-	PublicVisible bool     `json:"publicVisible"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Provider       string   `json:"provider"`
+	Summary        string   `json:"summary"`
+	Categories     []string `json:"categories"`
+	Context        string   `json:"context,omitempty"`
+	MaxInput       string   `json:"maxInput,omitempty"`
+	MaxOutput      string   `json:"maxOutput,omitempty"`
+	InputPrice     string   `json:"inputPrice,omitempty"`
+	OutputPrice    string   `json:"outputPrice,omitempty"`
+	CachePrice     string   `json:"cachePrice,omitempty"`
+	PriceUnit      string   `json:"priceUnit,omitempty"`
+	PublicVisible  bool     `json:"publicVisible"`
+	ExperienceMode string   `json:"experienceMode"`
 }
 
 type PublicCatalog struct {
@@ -144,18 +145,19 @@ type ModelExperienceRun struct {
 }
 
 type Model struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Provider    string `json:"provider"`
-	Type        string `json:"type"`
-	Context     string `json:"context"`
-	Latency     string `json:"latency"`
-	Price       string `json:"price"`
-	Status      string `json:"status"`
-	InputPrice  string `json:"inputPrice,omitempty"`
-	OutputPrice string `json:"outputPrice,omitempty"`
-	CachePrice  string `json:"cachePrice,omitempty"`
-	PriceUnit   string `json:"priceUnit,omitempty"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Provider       string `json:"provider"`
+	Type           string `json:"type"`
+	Context        string `json:"context"`
+	Latency        string `json:"latency"`
+	Price          string `json:"price"`
+	Status         string `json:"status"`
+	InputPrice     string `json:"inputPrice,omitempty"`
+	OutputPrice    string `json:"outputPrice,omitempty"`
+	CachePrice     string `json:"cachePrice,omitempty"`
+	PriceUnit      string `json:"priceUnit,omitempty"`
+	ExperienceMode string `json:"experienceMode,omitempty"`
 }
 
 type APIKey struct {

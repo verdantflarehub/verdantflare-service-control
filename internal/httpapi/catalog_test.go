@@ -17,12 +17,16 @@ import (
 )
 
 type catalogGateway struct {
-	models map[string]struct{}
-	err    error
+	models     map[string]struct{}
+	chatModels map[string]struct{}
+	err        error
 }
 
 func (g *catalogGateway) ListModels(context.Context) (map[string]struct{}, error) {
 	return g.models, g.err
+}
+func (g *catalogGateway) ListChatModels(context.Context) (map[string]struct{}, error) {
+	return g.chatModels, g.err
 }
 
 func TestPublicCatalogUsesOnlyExplicitlyPublishedDatabaseRecords(t *testing.T) {
@@ -93,7 +97,7 @@ func TestPublicCatalogUsesOnlyExplicitlyPublishedDatabaseRecords(t *testing.T) {
 func TestPublishedModelsFollowGatewayForWWWAndHub(t *testing.T) {
 	gateway := &catalogGateway{models: map[string]struct{}{
 		"verdantflare-sd2": {}, "deepseek-flash": {}, "deepseek-v4-pro": {},
-	}}
+	}, chatModels: map[string]struct{}{"deepseek-flash": {}, "deepseek-v4-pro": {}}}
 	service := control.NewService(store.NewMemoryBootstrap(), gateway)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := httptest.NewServer(httpapi.New(config.Config{Environment: "test", DevLoginSubject: "00000000-0000-4000-8000-000000000001"}, service, logger))
@@ -113,6 +117,12 @@ func TestPublishedModelsFollowGatewayForWWWAndHub(t *testing.T) {
 		}
 		published.Body.Close()
 	}
+	video := domain.PublicModel{ID: "verdantflare-sd2", Name: "Model verdantflare-sd2", Provider: "Verified", Summary: "Reviewed description", Categories: []string{"视频生成"}, PublicVisible: true, ExperienceMode: "chat"}
+	invalidExperience := request(t, server, http.MethodPatch, "/api/control/ops/models/verdantflare-sd2", video)
+	if invalidExperience.StatusCode != http.StatusConflict {
+		t.Fatalf("video model was opened as chat experience: %d %s", invalidExperience.StatusCode, readBody(t, invalidExperience))
+	}
+	invalidExperience.Body.Close()
 
 	public := request(t, server, http.MethodGet, "/api/control/public/catalog", nil)
 	var catalog domain.PublicCatalog

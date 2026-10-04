@@ -24,6 +24,7 @@ type accountGatewayFixture struct {
 	grants    map[string]bool
 	probes    int
 	chatCalls atomic.Int32
+	chatModel atomic.Value
 	chatErr   error
 }
 
@@ -75,8 +76,9 @@ func (f *accountGatewayFixture) ProbeKey(_ context.Context, org string, id int) 
 	return gateway.CenterProbe{}, gateway.CenterHTTPError{Status: 404}
 }
 
-func (f *accountGatewayFixture) ExperienceChat(_ context.Context, _ string, _ string) (gateway.CenterChatResult, error) {
+func (f *accountGatewayFixture) ExperienceChat(_ context.Context, _ string, modelID, _ string) (gateway.CenterChatResult, error) {
 	f.chatCalls.Add(1)
+	f.chatModel.Store(modelID)
 	if f.chatErr != nil {
 		return gateway.CenterChatResult{}, f.chatErr
 	}
