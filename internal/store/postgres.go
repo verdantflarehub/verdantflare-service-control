@@ -19,19 +19,20 @@ type Postgres struct {
 }
 
 type persistedState struct {
-	Users         map[string]domain.CenterUser        `json:"users"`
-	Organizations map[string]domain.Organization      `json:"organizations"`
-	Apps          map[string]domain.App               `json:"apps"`
-	Entitlements  map[string]map[string]bool          `json:"entitlements"`
-	Sessions      map[string]domain.ExperienceSession `json:"sessions"`
-	APIKeys       map[string]persistedAPIKey          `json:"apiKeys"`
-	Models        []domain.Model                      `json:"models"`
-	PublicModels  map[string]domain.PublicModel       `json:"publicModels"`
-	Tasks         []domain.APITask                    `json:"tasks"`
-	Members       map[string][]domain.Member          `json:"members"`
-	Billing       map[string]domain.BillingSummary    `json:"billing"`
-	Releases      []domain.Release                    `json:"releases"`
-	OpsOrgs       []domain.OperationsOrganization     `json:"operationsOrganizations"`
+	Users         map[string]domain.CenterUser         `json:"users"`
+	Organizations map[string]domain.Organization       `json:"organizations"`
+	Apps          map[string]domain.App                `json:"apps"`
+	Entitlements  map[string]map[string]bool           `json:"entitlements"`
+	Sessions      map[string]domain.ExperienceSession  `json:"sessions"`
+	ModelRuns     map[string]domain.ModelExperienceRun `json:"modelRuns"`
+	APIKeys       map[string]persistedAPIKey           `json:"apiKeys"`
+	Models        []domain.Model                       `json:"models"`
+	PublicModels  map[string]domain.PublicModel        `json:"publicModels"`
+	Tasks         []domain.APITask                     `json:"tasks"`
+	Members       map[string][]domain.Member           `json:"members"`
+	Billing       map[string]domain.BillingSummary     `json:"billing"`
+	Releases      []domain.Release                     `json:"releases"`
+	OpsOrgs       []domain.OperationsOrganization      `json:"operationsOrganizations"`
 }
 
 // Keep the verifier in private repository state while domain.APIKey continues
@@ -120,7 +121,7 @@ func encodeMemory(m *Memory) ([]byte, error) {
 	}
 	raw, err := json.Marshal(persistedState{
 		Users: m.users, Organizations: m.organizations, Apps: m.apps, Entitlements: m.entitlements,
-		Sessions: m.sessions, APIKeys: keys, Models: m.models, PublicModels: m.publicModels, Tasks: m.tasks,
+		Sessions: m.sessions, ModelRuns: m.modelRuns, APIKeys: keys, Models: m.models, PublicModels: m.publicModels, Tasks: m.tasks,
 		Members: m.members, Billing: m.billing, Releases: m.releases, OpsOrgs: m.opsOrgs,
 	})
 	if err != nil {
@@ -145,7 +146,7 @@ func decodeMemory(raw []byte) (*Memory, error) {
 	}
 	return &Memory{
 		users: state.Users, organizations: state.Organizations, apps: state.Apps,
-		entitlements: state.Entitlements, sessions: state.Sessions, apiKeys: keys,
+		entitlements: state.Entitlements, sessions: state.Sessions, modelRuns: state.ModelRuns, apiKeys: keys,
 		models: state.Models, publicModels: state.PublicModels, tasks: state.Tasks, members: state.Members, billing: state.Billing,
 		releases: state.Releases, opsOrgs: state.OpsOrgs,
 	}, nil

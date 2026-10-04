@@ -122,6 +122,26 @@ type ExperienceSession struct {
 	CleanupStatus  string     `json:"cleanupStatus"`
 }
 
+// ModelExperienceRun is a short-lived, user-owned paid inference record.
+// Prompt and response are removed with the record after ExpiresAt.
+type ModelExperienceRun struct {
+	ID             string     `json:"id"`
+	RequestID      string     `json:"requestId"`
+	OrganizationID string     `json:"organizationId"`
+	CenterUserID   string     `json:"centerUserId"`
+	ModelID        string     `json:"modelId"`
+	Prompt         string     `json:"prompt"`
+	Response       string     `json:"response,omitempty"`
+	Status         string     `json:"status"`
+	ErrorCode      string     `json:"errorCode,omitempty"`
+	PromptTokens   int        `json:"promptTokens,omitempty"`
+	OutputTokens   int        `json:"outputTokens,omitempty"`
+	TotalTokens    int        `json:"totalTokens,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	CompletedAt    *time.Time `json:"completedAt,omitempty"`
+	ExpiresAt      time.Time  `json:"expiresAt"`
+}
+
 type Model struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -228,6 +248,7 @@ type UsageSummary struct {
 	Budget     float64        `json:"budget"`
 	Used       float64        `json:"used"`
 	Remaining  float64        `json:"remaining"`
+	Enabled    bool           `json:"enabled"`
 	Percentage float64        `json:"percentage"`
 	ByModel    map[string]int `json:"byModel"`
 }

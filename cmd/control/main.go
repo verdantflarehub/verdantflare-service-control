@@ -68,6 +68,24 @@ func main() {
 		}
 		service.SetGatewayAccounts(accountGateway)
 	}
+	sweepContext, stopSweep := context.WithCancel(context.Background())
+	defer stopSweep()
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			operationContext, cancel := context.WithTimeout(sweepContext, 10*time.Second)
+			if err := service.SweepModelExperienceRuns(operationContext); err != nil && sweepContext.Err() == nil {
+				logger.Error("model experience cleanup failed", "error", err)
+			}
+			cancel()
+			select {
+			case <-sweepContext.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
 	handler := httpapi.New(configuration, service, logger)
 
 	server := &http.Server{

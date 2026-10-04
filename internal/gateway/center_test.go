@@ -31,6 +31,8 @@ func TestCenterClientUsesAuthenticatedOrganizationPaths(t *testing.T) {
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":1,"name":"test","secret":"sk-one-time","models":["deepseek-flash"]}}`))
 		case "GET /api/internal/center/organizations/org_alpha/keys/1/probe":
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"ok":true,"reason":"ok","models":["deepseek-flash"],"readOnly":true}}`))
+		case "POST /api/internal/center/organizations/org_alpha/experience/chat-completions":
+			_, _ = writer.Write([]byte(`{"choices":[{"message":{"content":"已生成的回答"}}],"usage":{"prompt_tokens":8,"completion_tokens":12,"total_tokens":20}}`))
 		case "POST /api/internal/center/organizations/org_alpha/keys/1/revoke", "PUT /api/internal/center/organizations/org_alpha/status":
 			_, _ = writer.Write([]byte(`{"success":true}`))
 		default:
@@ -65,7 +67,10 @@ func TestCenterClientUsesAuthenticatedOrganizationPaths(t *testing.T) {
 	if err := client.SetEnabled(ctx, "org_alpha", false); err != nil {
 		t.Fatal(err)
 	}
-	if len(seen) != 7 {
+	if result, err := client.ExperienceChat(ctx, "org_alpha", "你好"); err != nil || result.Response != "已生成的回答" || result.TotalTokens != 20 {
+		t.Fatalf("experience chat: %+v %v", result, err)
+	}
+	if len(seen) != 8 {
 		t.Fatalf("missing bridge calls: %v", seen)
 	}
 }

@@ -15,9 +15,10 @@ import (
 )
 
 type CenterClient struct {
-	baseURL string
-	token   string
-	client  *http.Client
+	baseURL    string
+	token      string
+	client     *http.Client
+	chatClient *http.Client
 }
 
 type CenterHTTPError struct{ Status int }
@@ -60,6 +61,13 @@ type CenterProbe struct {
 	ReadOnly       bool     `json:"readOnly"`
 }
 
+type CenterChatResult struct {
+	Response     string
+	PromptTokens int
+	OutputTokens int
+	TotalTokens  int
+}
+
 func NewCenterClient(baseURL, token string) (*CenterClient, error) {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	parsed, err := url.Parse(baseURL)
@@ -67,7 +75,8 @@ func NewCenterClient(baseURL, token string) (*CenterClient, error) {
 		return nil, errors.New("invalid center gateway origin or credential")
 	}
 	return &CenterClient{baseURL: baseURL + "/api/internal/center/organizations", token: token,
-		client: &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+		client:     &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		chatClient: &http.Client{Timeout: 75 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 func (c *CenterClient) request(ctx context.Context, method, path string, input, output any) error {
@@ -150,4 +159,43 @@ func (c *CenterClient) ProbeKey(ctx context.Context, organizationID string, toke
 	var result CenterProbe
 	err := c.request(ctx, http.MethodGet, centerPath(organizationID)+"/keys/"+strconv.Itoa(tokenID)+"/probe", nil, &result)
 	return result, err
+}
+
+func (c *CenterClient) ExperienceChat(ctx context.Context, organizationID, prompt string) (CenterChatResult, error) {
+	encoded, err := json.Marshal(map[string]string{"prompt": prompt})
+	if err != nil {
+		return CenterChatResult{}, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+centerPath(organizationID)+"/experience/chat-completions", bytes.NewReader(encoded))
+	if err != nil {
+		return CenterChatResult{}, err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := c.chatClient.Do(request)
+	if err != nil {
+		return CenterChatResult{}, fmt.Errorf("center experience request failed: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		return CenterChatResult{}, CenterHTTPError{Status: response.StatusCode}
+	}
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens int `json:"prompt_tokens"`
+			OutputTokens int `json:"completion_tokens"`
+			TotalTokens  int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result); err != nil || len(result.Choices) == 0 || strings.TrimSpace(result.Choices[0].Message.Content) == "" ||
+		result.Usage.PromptTokens < 1 || result.Usage.OutputTokens < 0 || result.Usage.TotalTokens < result.Usage.PromptTokens {
+		return CenterChatResult{}, errors.New("invalid center experience response")
+	}
+	return CenterChatResult{Response: result.Choices[0].Message.Content, PromptTokens: result.Usage.PromptTokens,
+		OutputTokens: result.Usage.OutputTokens, TotalTokens: result.Usage.TotalTokens}, nil
 }

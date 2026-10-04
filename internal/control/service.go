@@ -23,6 +23,7 @@ type Service struct {
 	repository     store.Repository
 	modelGateway   ModelGateway
 	accountGateway GatewayAccounts
+	modelRunSlots  chan struct{}
 	now            func() time.Time
 }
 
@@ -38,6 +39,7 @@ type GatewayAccounts interface {
 	CreateKey(context.Context, string, string, string, []string, int) (gateway.CenterCreatedKey, error)
 	RevokeKey(context.Context, string, int) error
 	ProbeKey(context.Context, string, int) (gateway.CenterProbe, error)
+	ExperienceChat(context.Context, string, string) (gateway.CenterChatResult, error)
 }
 
 func (s *Service) SetGatewayAccounts(accounts GatewayAccounts) { s.accountGateway = accounts }
@@ -45,7 +47,7 @@ func (s *Service) SetGatewayAccounts(accounts GatewayAccounts) { s.accountGatewa
 var gatewayRequestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,80}$`)
 
 func NewService(repository store.Repository, gateways ...ModelGateway) *Service {
-	service := &Service{repository: repository, now: func() time.Time { return time.Now().UTC() }}
+	service := &Service{repository: repository, modelRunSlots: make(chan struct{}, 4), now: func() time.Time { return time.Now().UTC() }}
 	if len(gateways) > 0 {
 		service.modelGateway = gateways[0]
 	}
@@ -312,7 +314,7 @@ func (s *Service) Usage(ctx context.Context, subject string) (domain.UsageSummar
 	if budget > 0 {
 		percentage = used / budget * 100
 	}
-	return domain.UsageSummary{Budget: budget, Used: used, Remaining: remaining, Percentage: percentage, ByModel: map[string]int{}}, nil
+	return domain.UsageSummary{Budget: budget, Used: used, Remaining: remaining, Enabled: balance.Enabled, Percentage: percentage, ByModel: map[string]int{}}, nil
 }
 
 func (s *Service) Organization(ctx context.Context, subject string) (domain.Organization, error) {

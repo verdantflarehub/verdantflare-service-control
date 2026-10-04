@@ -43,6 +43,9 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("GET /api/control/experience/sessions", server.listExperienceSessions)
 	mux.HandleFunc("POST /api/control/experience/sessions", server.createExperienceSession)
 	mux.HandleFunc("DELETE /api/control/experience/sessions/{sessionID}", server.closeExperienceSession)
+	mux.HandleFunc("GET /api/control/experience/model-runs", server.listModelExperienceRuns)
+	mux.HandleFunc("POST /api/control/experience/model-runs", server.createModelExperienceRun)
+	mux.HandleFunc("GET /api/control/experience/model-runs/{runID}", server.getModelExperienceRun)
 
 	mux.HandleFunc("GET /api/control/api-keys", server.listAPIKeys)
 	mux.HandleFunc("POST /api/control/api-keys", server.createAPIKey)

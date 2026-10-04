@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,10 +19,12 @@ import (
 )
 
 type accountGatewayFixture struct {
-	balances map[string]gateway.CenterBalance
-	keys     map[string][]gateway.CenterKey
-	grants   map[string]bool
-	probes   int
+	balances  map[string]gateway.CenterBalance
+	keys      map[string][]gateway.CenterKey
+	grants    map[string]bool
+	probes    int
+	chatCalls atomic.Int32
+	chatErr   error
 }
 
 func newAccountGatewayFixture() *accountGatewayFixture {
@@ -70,6 +73,14 @@ func (f *accountGatewayFixture) ProbeKey(_ context.Context, org string, id int) 
 		}
 	}
 	return gateway.CenterProbe{}, gateway.CenterHTTPError{Status: 404}
+}
+
+func (f *accountGatewayFixture) ExperienceChat(_ context.Context, _ string, _ string) (gateway.CenterChatResult, error) {
+	f.chatCalls.Add(1)
+	if f.chatErr != nil {
+		return gateway.CenterChatResult{}, f.chatErr
+	}
+	return gateway.CenterChatResult{Response: "真实上游响应", PromptTokens: 12, OutputTokens: 8, TotalTokens: 20}, nil
 }
 
 func TestAPIKeyCreditAndReadOnlyProbeHTTPFlow(t *testing.T) {

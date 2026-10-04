@@ -20,6 +20,7 @@ type Memory struct {
 	apps          map[string]domain.App
 	entitlements  map[string]map[string]bool
 	sessions      map[string]domain.ExperienceSession
+	modelRuns     map[string]domain.ModelExperienceRun
 	apiKeys       map[string]domain.APIKey
 	models        []domain.Model
 	publicModels  map[string]domain.PublicModel
@@ -46,7 +47,8 @@ func NewMemoryBootstrap() *Memory {
 		organizations: map[string]domain.Organization{organizationID: {OrganizationID: organizationID, Name: "VerdantFlare", ShortName: "VF", EntitlementVersion: 1, Status: "正常"}},
 		apps:          map[string]domain.App{}, entitlements: map[string]map[string]bool{organizationID: {}},
 		sessions: map[string]domain.ExperienceSession{}, apiKeys: map[string]domain.APIKey{},
-		models: []domain.Model{}, publicModels: map[string]domain.PublicModel{}, tasks: []domain.APITask{}, members: map[string][]domain.Member{},
+		modelRuns: map[string]domain.ModelExperienceRun{},
+		models:    []domain.Model{}, publicModels: map[string]domain.PublicModel{}, tasks: []domain.APITask{}, members: map[string][]domain.Member{},
 		billing: map[string]domain.BillingSummary{}, releases: []domain.Release{}, opsOrgs: []domain.OperationsOrganization{},
 	}
 }
@@ -104,6 +106,7 @@ func NewMemorySeeded(now time.Time) *Memory {
 		sessions: map[string]domain.ExperienceSession{
 			"exp_2F7A19": {ID: "exp_2F7A19", OrganizationID: verdantflare.OrganizationID, CenterUserID: "cu_01HUB7C9Q", AppID: "comfyui-studio", App: "ComfyUI Studio", Region: "cn-east-1", StartedAt: now.Add(-18 * time.Minute), ExpiresAt: now.Add(42 * time.Minute), Remaining: "42 分钟", Status: "运行中", Usage: "18 点", CleanupStatus: "保留中"},
 		},
+		modelRuns: map[string]domain.ModelExperienceRun{},
 		apiKeys: map[string]domain.APIKey{
 			"key_prod_31": {ID: "key_prod_31", OrganizationID: verdantflare.OrganizationID, Name: "内容生产服务", Prefix: "vf_live_7p3a••••••••2k9x", Scopes: []string{"models:read", "tasks:write"}, CreatedAt: time.Date(2026, 7, 2, 8, 0, 0, 0, time.UTC), Status: "有效", SecretHash: sha256.Sum256([]byte("seed-key-prod-not-a-secret"))},
 			"key_dev_18":  {ID: "key_dev_18", OrganizationID: verdantflare.OrganizationID, Name: "研发 Playground", Prefix: "vf_test_2m1c••••••••8az4", Scopes: []string{"models:read", "tasks:write", "usage:read"}, CreatedAt: time.Date(2026, 6, 18, 8, 0, 0, 0, time.UTC), Status: "有效", SecretHash: sha256.Sum256([]byte("seed-key-dev-not-a-secret"))},

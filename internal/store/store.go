@@ -20,6 +20,12 @@ type Repository interface {
 	ListExperienceSessions(context.Context, string) ([]domain.ExperienceSession, error)
 	CreateExperienceSession(context.Context, string, string, domain.App, string, time.Duration, int) (domain.ExperienceSession, error)
 	CloseExperienceSession(context.Context, string, string) (domain.ExperienceSession, error)
+	ListModelExperienceRuns(context.Context, string, string) ([]domain.ModelExperienceRun, error)
+	GetModelExperienceRun(context.Context, string, string, string) (domain.ModelExperienceRun, error)
+	FindModelExperienceRunByRequestID(context.Context, string, string) (domain.ModelExperienceRun, bool, error)
+	CreateModelExperienceRun(context.Context, domain.ModelExperienceRun) (domain.ModelExperienceRun, bool, error)
+	FinishModelExperienceRun(context.Context, string, string, string, string, string, string, int, int, int) (domain.ModelExperienceRun, error)
+	SweepModelExperienceRuns(context.Context, time.Time) error
 
 	ListAPIKeys(context.Context, string) ([]domain.APIKey, error)
 	CreateAPIKey(context.Context, string, domain.APIKey) (domain.APIKey, error)
