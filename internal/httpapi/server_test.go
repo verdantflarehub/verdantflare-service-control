@@ -133,6 +133,35 @@ func TestManagedAppPublicationAndEntitlement(t *testing.T) {
 	if containsApp(withoutGrant, appID) {
 		t.Fatal("unentitled app appeared in customer Market")
 	}
+	public := request(t, server, http.MethodPatch, "/api/control/ops/apps/"+appID, map[string]any{
+		"name": "Workflow Demo", "version": "0.1.0", "category": "视觉创作", "summary": "测试应用", "channel": "Preview", "publicVisible": true,
+	})
+	if public.StatusCode != http.StatusOK {
+		t.Fatalf("public publish status = %d, body = %s", public.StatusCode, readBody(t, public))
+	}
+	public.Body.Close()
+	market = request(t, server, http.MethodGet, "/api/control/market/apps", nil)
+	var publicApps []domain.App
+	decode(t, market, &publicApps)
+	market.Body.Close()
+	if !containsApp(publicApps, appID) {
+		t.Fatal("public app missing from customer Market")
+	}
+	for _, app := range publicApps {
+		if app.ID == appID && app.Entitled {
+			t.Fatal("public app was incorrectly marked entitled")
+		}
+	}
+	publicDetail := request(t, server, http.MethodGet, "/api/control/market/apps/"+appID, nil)
+	if publicDetail.StatusCode != http.StatusOK {
+		t.Fatalf("public app detail status = %d", publicDetail.StatusCode)
+	}
+	var publicApp domain.App
+	decode(t, publicDetail, &publicApp)
+	publicDetail.Body.Close()
+	if publicApp.Entitled {
+		t.Fatal("public app detail was incorrectly marked entitled")
+	}
 
 	organization := request(t, server, http.MethodGet, "/api/control/ops/organizations/org_verdantflare", nil)
 	var managed domain.ManagedOrganization
@@ -162,6 +191,11 @@ func TestManagedAppPublicationAndEntitlement(t *testing.T) {
 	market.Body.Close()
 	if !containsApp(entitled, appID) {
 		t.Fatal("published entitled app missing from customer Market")
+	}
+	for _, app := range entitled {
+		if app.ID == appID && !app.Entitled {
+			t.Fatal("granted app was not marked entitled")
+		}
 	}
 
 	stale := request(t, server, http.MethodPatch, "/api/control/ops/organizations/org_verdantflare", map[string]any{

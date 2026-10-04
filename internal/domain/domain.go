@@ -66,6 +66,7 @@ type App struct {
 	CPU           string `json:"cpu,omitempty"`
 	PublicIconURL string `json:"publicIconUrl,omitempty"`
 	PublicVisible bool   `json:"publicVisible"`
+	Entitled      bool   `json:"entitled"`
 }
 
 // PublicModel contains editorial, public-facing model facts. It is not a

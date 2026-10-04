@@ -109,8 +109,12 @@ func (s *Service) Overview(ctx context.Context, subject string) (domain.Overview
 	if err != nil {
 		return domain.Overview{}, err
 	}
-	overview := domain.Overview{Organization: organization, AvailableApps: len(apps)}
+	overview := domain.Overview{Organization: organization}
 	for _, app := range apps {
+		if !app.Entitled {
+			continue
+		}
+		overview.AvailableApps++
 		if app.Channel == "Preview" {
 			overview.PreviewApps++
 		}

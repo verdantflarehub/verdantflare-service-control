@@ -261,13 +261,15 @@ func (m *Memory) UpdateOrganization(_ context.Context, organizationID string, up
 func (m *Memory) ListApps(_ context.Context, organizationID string) ([]domain.App, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.organizations[organizationID].Status == "冻结" {
-		return []domain.App{}, nil
-	}
 	entitlements := m.entitlements[organizationID]
-	result := make([]domain.App, 0, len(entitlements))
-	for id, entitled := range entitlements {
-		if app, ok := m.apps[id]; ok && entitled && published(app) {
+	active := m.organizations[organizationID].Status != "冻结"
+	result := make([]domain.App, 0, len(m.apps))
+	for id, app := range m.apps {
+		if !published(app) {
+			continue
+		}
+		app.Entitled = active && entitlements[id]
+		if app.PublicVisible || app.Entitled {
 			result = append(result, app)
 		}
 	}
@@ -278,12 +280,13 @@ func (m *Memory) ListApps(_ context.Context, organizationID string) ([]domain.Ap
 func (m *Memory) GetApp(_ context.Context, organizationID, appID string) (domain.App, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.organizations[organizationID].Status == "冻结" || !m.entitlements[organizationID][appID] {
-		return domain.App{}, domain.NewError(404, "app_not_found", "应用不存在或当前组织无权查看")
-	}
 	app, ok := m.apps[appID]
 	if !ok || !published(app) {
 		return domain.App{}, domain.NewError(404, "app_not_found", "应用不存在")
+	}
+	app.Entitled = m.organizations[organizationID].Status != "冻结" && m.entitlements[organizationID][appID]
+	if !app.PublicVisible && !app.Entitled {
+		return domain.App{}, domain.NewError(404, "app_not_found", "应用不存在或当前组织无权查看")
 	}
 	return app, nil
 }

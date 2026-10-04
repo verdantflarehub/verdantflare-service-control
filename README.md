@@ -61,7 +61,7 @@ CONTROL_TRUST_AUTH_HEADERS=true
 | GET | `/api/control/context` | Center Context |
 | PUT | `/api/control/context/active-organization` | 切换当前组织 |
 | GET | `/api/control/overview` | Hub 首页聚合摘要 |
-| GET | `/api/control/market/apps` | 当前组织可用应用 |
+| GET | `/api/control/market/apps` | 已公开应用与当前组织获授权应用，附 `entitled` 状态 |
 | GET | `/api/control/market/apps/{id}` | 应用详情 |
 | GET/POST | `/api/control/experience/sessions` | Session 历史记录；POST 在运行资源接入前返回 503 |
 | DELETE | `/api/control/experience/sessions/{id}` | 关闭 Session |
