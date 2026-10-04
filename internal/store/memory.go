@@ -413,7 +413,7 @@ func (m *Memory) Usage(_ context.Context, organizationID string) (domain.UsageSu
 	if billing.APIBudget > 0 {
 		percentage = float64(billing.APIUsed) / float64(billing.APIBudget) * 100
 	}
-	return domain.UsageSummary{Budget: billing.APIBudget, Used: billing.APIUsed, Remaining: billing.APIBudget - billing.APIUsed, Percentage: percentage, ByModel: map[string]int{}}, nil
+	return domain.UsageSummary{Budget: float64(billing.APIBudget), Used: float64(billing.APIUsed), Remaining: float64(billing.APIBudget - billing.APIUsed), Percentage: percentage, ByModel: map[string]int{}}, nil
 }
 
 func (m *Memory) ListMembers(_ context.Context, organizationID string) ([]domain.Member, error) {

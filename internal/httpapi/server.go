@@ -47,6 +47,7 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("GET /api/control/api-keys", server.listAPIKeys)
 	mux.HandleFunc("POST /api/control/api-keys", server.createAPIKey)
 	mux.HandleFunc("DELETE /api/control/api-keys/{keyID}", server.revokeAPIKey)
+	mux.HandleFunc("GET /api/control/api-keys/{keyID}/probe", server.probeAPIKey)
 	mux.HandleFunc("GET /api/control/api/models", server.listModels)
 	mux.HandleFunc("GET /api/control/api/tasks", server.listAPITasks)
 	mux.HandleFunc("GET /api/control/api/usage", server.getUsage)
@@ -71,6 +72,8 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("POST /api/control/ops/organizations", server.createManagedOrganization)
 	mux.HandleFunc("GET /api/control/ops/organizations/{organizationID}", server.getManagedOrganization)
 	mux.HandleFunc("PATCH /api/control/ops/organizations/{organizationID}", server.updateManagedOrganization)
+	mux.HandleFunc("GET /api/control/ops/organizations/{organizationID}/api-credit", server.getOrganizationAPICredit)
+	mux.HandleFunc("POST /api/control/ops/organizations/{organizationID}/api-credit", server.grantOrganizationAPICredit)
 	mux.HandleFunc("POST /api/control/ops/organizations/{organizationID}/members", server.createManagedMember)
 	mux.HandleFunc("PATCH /api/control/ops/organizations/{organizationID}/members/{memberID}", server.updateManagedMember)
 

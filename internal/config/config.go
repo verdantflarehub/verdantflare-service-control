@@ -9,19 +9,20 @@ import (
 )
 
 type Config struct {
-	Environment      string
-	Address          string
-	DatabaseURL      string
-	DatabaseMaxOpen  int
-	DatabaseMaxIdle  int
-	GatewayBaseURL   string
-	GatewayToken     string
-	DevLoginSubject  string
-	TrustAuthHeaders bool
-	AllowedOrigins   []string
-	ReadTimeout      time.Duration
-	WriteTimeout     time.Duration
-	ShutdownTimeout  time.Duration
+	Environment       string
+	Address           string
+	DatabaseURL       string
+	DatabaseMaxOpen   int
+	DatabaseMaxIdle   int
+	GatewayBaseURL    string
+	GatewayToken      string
+	GatewayAdminToken string
+	DevLoginSubject   string
+	TrustAuthHeaders  bool
+	AllowedOrigins    []string
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	ShutdownTimeout   time.Duration
 }
 
 func Load() (Config, error) {
@@ -44,27 +45,32 @@ func Load() (Config, error) {
 	}
 	gatewayBaseURL := strings.TrimSpace(os.Getenv("CONTROL_GATEWAY_BASE_URL"))
 	gatewayToken := strings.TrimSpace(os.Getenv("CONTROL_GATEWAY_TOKEN"))
+	gatewayAdminToken := strings.TrimSpace(os.Getenv("CONTROL_GATEWAY_ADMIN_TOKEN"))
 	if environment == "production" && strings.HasPrefix(strings.ToLower(gatewayBaseURL), "http://") {
 		return Config{}, fmt.Errorf("CONTROL_GATEWAY_BASE_URL must use HTTPS in production")
 	}
 	if (gatewayBaseURL == "") != (gatewayToken == "") {
 		return Config{}, fmt.Errorf("CONTROL_GATEWAY_BASE_URL and CONTROL_GATEWAY_TOKEN must be set together")
 	}
+	if gatewayAdminToken != "" && (gatewayBaseURL == "" || len(gatewayAdminToken) < 32) {
+		return Config{}, fmt.Errorf("CONTROL_GATEWAY_ADMIN_TOKEN requires a gateway URL and at least 32 characters")
+	}
 
 	return Config{
-		Environment:      environment,
-		Address:          env("CONTROL_ADDRESS", ":8080"),
-		DatabaseURL:      databaseURL,
-		DatabaseMaxOpen:  positiveInt("CONTROL_DATABASE_MAX_OPEN", 5),
-		DatabaseMaxIdle:  positiveInt("CONTROL_DATABASE_MAX_IDLE", 2),
-		GatewayBaseURL:   gatewayBaseURL,
-		GatewayToken:     gatewayToken,
-		DevLoginSubject:  devSubject,
-		TrustAuthHeaders: trustHeaders,
-		AllowedOrigins:   splitCSV(os.Getenv("CONTROL_ALLOWED_ORIGINS")),
-		ReadTimeout:      10 * time.Second,
-		WriteTimeout:     15 * time.Second,
-		ShutdownTimeout:  10 * time.Second,
+		Environment:       environment,
+		Address:           env("CONTROL_ADDRESS", ":8080"),
+		DatabaseURL:       databaseURL,
+		DatabaseMaxOpen:   positiveInt("CONTROL_DATABASE_MAX_OPEN", 5),
+		DatabaseMaxIdle:   positiveInt("CONTROL_DATABASE_MAX_IDLE", 2),
+		GatewayBaseURL:    gatewayBaseURL,
+		GatewayToken:      gatewayToken,
+		GatewayAdminToken: gatewayAdminToken,
+		DevLoginSubject:   devSubject,
+		TrustAuthHeaders:  trustHeaders,
+		AllowedOrigins:    splitCSV(os.Getenv("CONTROL_ALLOWED_ORIGINS")),
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		ShutdownTimeout:   10 * time.Second,
 	}, nil
 }
 

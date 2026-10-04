@@ -139,6 +139,7 @@ type Model struct {
 
 type APIKey struct {
 	ID             string     `json:"id"`
+	Source         string     `json:"source,omitempty"`
 	OrganizationID string     `json:"organizationId,omitempty"`
 	Name           string     `json:"name"`
 	Prefix         string     `json:"prefix"`
@@ -224,9 +225,9 @@ type OperationsOrganization struct {
 }
 
 type UsageSummary struct {
-	Budget     int            `json:"budget"`
-	Used       int            `json:"used"`
-	Remaining  int            `json:"remaining"`
+	Budget     float64        `json:"budget"`
+	Used       float64        `json:"used"`
+	Remaining  float64        `json:"remaining"`
 	Percentage float64        `json:"percentage"`
 	ByModel    map[string]int `json:"byModel"`
 }

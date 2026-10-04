@@ -60,6 +60,14 @@ func main() {
 		}
 	}
 	service := control.NewService(repository, modelGateway)
+	if configuration.GatewayAdminToken != "" {
+		accountGateway, err := gateway.NewCenterClient(configuration.GatewayBaseURL, configuration.GatewayAdminToken)
+		if err != nil {
+			logger.Error("invalid center gateway configuration", "error", err)
+			os.Exit(1)
+		}
+		service.SetGatewayAccounts(accountGateway)
+	}
 	handler := httpapi.New(configuration, service, logger)
 
 	server := &http.Server{

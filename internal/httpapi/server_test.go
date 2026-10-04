@@ -177,17 +177,10 @@ func TestManagedAppPublicationAndEntitlement(t *testing.T) {
 		"plan": "Enterprise", "status": "冻结", "appIds": appIDs,
 		"expectedEntitlementVersion": granted.Organization.EntitlementVersion,
 	})
-	if frozen.StatusCode != http.StatusOK {
-		t.Fatalf("freeze status = %d, body = %s", frozen.StatusCode, readBody(t, frozen))
+	if frozen.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("freeze without gateway must fail closed: status = %d, body = %s", frozen.StatusCode, readBody(t, frozen))
 	}
 	frozen.Body.Close()
-	market = request(t, server, http.MethodGet, "/api/control/market/apps", nil)
-	var afterFreeze []domain.App
-	decode(t, market, &afterFreeze)
-	market.Body.Close()
-	if len(afterFreeze) != 0 {
-		t.Fatalf("frozen organization still has %d Market apps", len(afterFreeze))
-	}
 }
 
 func TestManagedWriteRequiresCurrentOperationsRole(t *testing.T) {
@@ -297,7 +290,7 @@ func TestHubPageDataEndpointsAndAPIKeyLifecycle(t *testing.T) {
 	server := newTestServer(t, testConfig())
 	for _, path := range []string{
 		"/api/control/overview", "/api/control/api/models", "/api/control/market/apps",
-		"/api/control/api-keys", "/api/control/settings/organization", "/api/control/settings/members",
+		"/api/control/settings/organization", "/api/control/settings/members",
 		"/api/control/ops/releases", "/api/control/ops/organizations",
 	} {
 		response := request(t, server, http.MethodGet, path, nil)
@@ -306,7 +299,7 @@ func TestHubPageDataEndpointsAndAPIKeyLifecycle(t *testing.T) {
 		}
 		response.Body.Close()
 	}
-	for _, path := range []string{"/api/control/settings/billing", "/api/control/api/usage"} {
+	for _, path := range []string{"/api/control/settings/billing", "/api/control/api/usage", "/api/control/api-keys"} {
 		response := request(t, server, http.MethodGet, path, nil)
 		if response.StatusCode != http.StatusServiceUnavailable {
 			t.Fatalf("GET %s status = %d, body = %s", path, response.StatusCode, readBody(t, response))
@@ -318,19 +311,6 @@ func TestHubPageDataEndpointsAndAPIKeyLifecycle(t *testing.T) {
 		t.Fatalf("revoke key status = %d, body = %s", revoked.StatusCode, readBody(t, revoked))
 	}
 	revoked.Body.Close()
-	listed := request(t, server, http.MethodGet, "/api/control/api-keys", nil)
-	var keys []domain.APIKey
-	decode(t, listed, &keys)
-	listed.Body.Close()
-	found := false
-	for _, item := range keys {
-		if item.ID == "key_prod_31" {
-			found = item.Status == "已撤销"
-		}
-	}
-	if !found {
-		t.Fatal("revoked key status not reflected in list")
-	}
 }
 
 func containsApp(apps []domain.App, id string) bool {

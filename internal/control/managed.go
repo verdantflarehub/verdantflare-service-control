@@ -171,5 +171,29 @@ func (s *Service) UpdateManagedOrganization(ctx context.Context, subject, id str
 			return domain.ManagedOrganization{}, domain.NewError(400, "billing_email_invalid", "账单邮箱格式不正确")
 		}
 	}
-	return s.repository.UpdateManagedOrganization(ctx, id, domain.Organization{Name: input.Name, ShortName: input.ShortName, DefaultRegion: input.DefaultRegion, Industry: input.Industry, BillingEmail: input.BillingEmail, Plan: input.Plan, Status: input.Status}, input.AppIDs, input.ExpectedEntitlementVersion)
+	current, err := s.repository.ManagedOrganization(ctx, id)
+	if err != nil {
+		return domain.ManagedOrganization{}, err
+	}
+	if current.Organization.EntitlementVersion != input.ExpectedEntitlementVersion {
+		return domain.ManagedOrganization{}, domain.NewError(409, "entitlement_version_conflict", "权益已被其他管理员修改，请刷新后重试")
+	}
+	if (input.Status == "冻结" || current.Organization.Status == "冻结") && s.accountGateway == nil {
+		return domain.ManagedOrganization{}, domain.NewError(503, "gateway_accounts_unconfigured", "模型网关账号服务尚未配置")
+	}
+	if input.Status == "冻结" {
+		if err := s.accountGateway.SetEnabled(ctx, id, false); err != nil {
+			return domain.ManagedOrganization{}, gatewayAccountError(err)
+		}
+	}
+	result, err := s.repository.UpdateManagedOrganization(ctx, id, domain.Organization{Name: input.Name, ShortName: input.ShortName, DefaultRegion: input.DefaultRegion, Industry: input.Industry, BillingEmail: input.BillingEmail, Plan: input.Plan, Status: input.Status}, input.AppIDs, input.ExpectedEntitlementVersion)
+	if err != nil {
+		return domain.ManagedOrganization{}, err
+	}
+	if input.Status == "正常" && s.accountGateway != nil {
+		if err := s.accountGateway.SetEnabled(ctx, id, true); err != nil {
+			return result, gatewayAccountError(err)
+		}
+	}
+	return result, nil
 }
