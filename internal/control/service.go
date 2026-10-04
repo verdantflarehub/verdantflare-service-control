@@ -16,12 +16,21 @@ import (
 )
 
 type Service struct {
-	repository store.Repository
-	now        func() time.Time
+	repository   store.Repository
+	modelGateway ModelGateway
+	now          func() time.Time
 }
 
-func NewService(repository store.Repository) *Service {
-	return &Service{repository: repository, now: func() time.Time { return time.Now().UTC() }}
+type ModelGateway interface {
+	ListModels(context.Context) (map[string]struct{}, error)
+}
+
+func NewService(repository store.Repository, gateways ...ModelGateway) *Service {
+	service := &Service{repository: repository, now: func() time.Time { return time.Now().UTC() }}
+	if len(gateways) > 0 {
+		service.modelGateway = gateways[0]
+	}
+	return service
 }
 
 type CreateExperienceInput struct {
@@ -161,8 +170,24 @@ func (s *Service) ListModels(ctx context.Context, subject string) ([]domain.Mode
 	if _, _, _, err := s.activeOrganization(ctx, subject); err != nil {
 		return nil, err
 	}
-	// Model availability and pricing are owned by the gateway, not bootstrap rows.
-	return []domain.Model{}, nil
+	published, err := s.publishedGatewayModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	models := make([]domain.Model, 0, len(published))
+	for _, item := range published {
+		category := ""
+		if len(item.Categories) > 0 {
+			category = item.Categories[0]
+		}
+		models = append(models, domain.Model{
+			ID: item.ID, Name: item.Name, Provider: item.Provider,
+			Type: category, Context: item.Context, Status: "网关已列出",
+			InputPrice: item.InputPrice, OutputPrice: item.OutputPrice,
+			CachePrice: item.CachePrice, PriceUnit: item.PriceUnit,
+		})
+	}
+	return models, nil
 }
 
 func (s *Service) ListAPITasks(ctx context.Context, subject string) ([]domain.APITask, error) {

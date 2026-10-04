@@ -123,14 +123,18 @@ type ExperienceSession struct {
 }
 
 type Model struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Provider string `json:"provider"`
-	Type     string `json:"type"`
-	Context  string `json:"context"`
-	Latency  string `json:"latency"`
-	Price    string `json:"price"`
-	Status   string `json:"status"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Provider    string `json:"provider"`
+	Type        string `json:"type"`
+	Context     string `json:"context"`
+	Latency     string `json:"latency"`
+	Price       string `json:"price"`
+	Status      string `json:"status"`
+	InputPrice  string `json:"inputPrice,omitempty"`
+	OutputPrice string `json:"outputPrice,omitempty"`
+	CachePrice  string `json:"cachePrice,omitempty"`
+	PriceUnit   string `json:"priceUnit,omitempty"`
 }
 
 type APIKey struct {

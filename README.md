@@ -9,11 +9,11 @@ VerdantFlare Hub 的 Go 业务后端。首期采用模块化单体，统一暴�
 - 按组织权益过滤的应用 Market。
 - Experience Session 历史记录查询、关闭；运行资源尚未接入，创建接口返回 503，不生成伪运行记录。
 - 历史 API Key 记录查询与撤销；模型网关凭证尚未接入，新建 Key 返回 503，避免生成无法使用的凭证。
-- 模型目录与任务接口在接入网关前返回空列表；用量与账单接口返回 503，不展示初始化样例。
+- 模型目录通过专用 Token 读取 new-api `/v1/models`，与运营显式上架记录求交集后提供 WWW 和 Hub；未配置凭据或网关异常时不回退样例。任务接口仍返回空列表，用量与账单接口仍返回 503。
 - 组织资料、成员记录及已绑定用户的组织角色／停用状态。
 - 应用 Candidate → Preview 发布、客户组织创建/冻结与应用权益分配；运营操作按当前角色校验并持久化。
 - 成员邀请在本版保存为待接受业务记录，不创建 Login 账号或发送邮件。
-- Hub 管理的公开模型资料及应用版本落库；匿名只读目录仅返回显式公开字段供 WWW 使用，不包含组织权益或运行信息。
+- Hub 管理的公开模型资料及应用版本落库；模型显式上架后同时可供 WWW 和 Hub 读取，但仍以网关当前返回的模型 ID 为准。
 - 统一 JSON 错误、Request ID、安全响应头、请求体限制和优雅退出。
 
 ## 本地运行
@@ -25,6 +25,8 @@ make run
 ```
 
 默认监听 `:8080`。开发环境使用 `CONTROL_DEV_LOGIN_SUBJECT` 对接现有测试身份，但不初始化演示业务数据：
+
+模型上架还需设置 `CONTROL_GATEWAY_BASE_URL=https://api.verdantflarehub.com` 和 `CONTROL_GATEWAY_TOKEN`。后者是在 new-api 创建的专用**客户端** Token（不是 DeepSeek/JD 供应商 Key），建议固定 `default` 分组、仅允许需同步的模型。Token 只保存在受控 Secret，不写入仓库；缺失时可编辑草稿，但上架与已有公开模型读取会返回 503。
 
 ```bash
 curl http://localhost:8080/api/control/context
@@ -62,7 +64,7 @@ CONTROL_TRUST_AUTH_HEADERS=true
 | DELETE | `/api/control/experience/sessions/{id}` | 关闭 Session |
 | GET/POST | `/api/control/api-keys` | 历史 Key 列表；POST 在网关接入前返回 503 |
 | DELETE | `/api/control/api-keys/{id}` | 撤销 API Key |
-| GET | `/api/control/api/models` | 已授权模型目录 |
+| GET | `/api/control/api/models` | 当前已上架且在专用网关 Token 的模型列表中可见的目录；不授予客户调用权限 |
 | GET | `/api/control/api/tasks` | API 任务摘要 |
 | GET | `/api/control/api/usage` | API 用量摘要 |
 | GET/PATCH | `/api/control/settings/organization` | 组织资料 |
@@ -72,6 +74,7 @@ CONTROL_TRUST_AUTH_HEADERS=true
 | GET | `/api/control/ops/releases` | 应用发布运营 |
 | GET | `/api/control/public/catalog` | 匿名公开模型与应用目录，仅包含公开字段 |
 | GET/POST | `/api/control/ops/models` | 查看、新建模型公开资料，需 `api_ops_admin` |
+| GET | `/api/control/ops/gateway-models` | 查询专用网关 Token 当前可见的模型 ID，需 `api_ops_admin` |
 | PATCH | `/api/control/ops/models/{id}` | 编辑模型资料与公开状态，需 `api_ops_admin` |
 | GET | `/api/control/ops/organizations` | 客户组织运营 |
 | POST | `/api/control/ops/apps` | 创建 Candidate 应用，需 `app_ops_admin` |
@@ -88,7 +91,7 @@ CONTROL_TRUST_AUTH_HEADERS=true
 
 创建的应用默认 `Candidate`，不会出现在客户 Market。运营发布到 `Preview` 后，还需在客户组织详情授权；冻结组织、暂停或退回 Candidate 的应用都不会在 Market 显示。组织权益更新使用 `expectedEntitlementVersion` 检查并发修改，冲突返回 409；未发布应用的已有授权会保留，避免修改套餐时被隐式删除。
 
-首版尚未打通 Login 账号邀请/全局禁用、邮件投递、Studio/Station 的真实安装与运行，以及模型提供商配置。Control 历史 Key 不等于模型网关凭证；页面不应把待接受成员记录或体验 Session 记录当作这些能力已生效。存量样例清理和备份以工作区设计与运维记录为准。
+首版尚未打通 Login 账号邀请/全局禁用、邮件投递、Studio/Station 的真实安装与运行。模型可见性已接入网关，但 Control 历史 Key 不等于模型网关凭证，Hub 的在线调试仍未接入；页面不应把待接受成员记录或体验 Session 记录当作这些能力已生效。存量样例清理和备份以工作区设计与运维记录为准。
 
 ## 验证
 

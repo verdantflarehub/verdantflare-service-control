@@ -20,6 +20,15 @@ func (s *Server) listManagedModels(w http.ResponseWriter, r *http.Request) {
 	s.respond(w, r, result, err, http.StatusOK)
 }
 
+func (s *Server) listGatewayModels(w http.ResponseWriter, r *http.Request) {
+	subject, ok := s.subject(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.service.ListGatewayModels(r.Context(), subject)
+	s.respond(w, r, result, err, http.StatusOK)
+}
+
 func (s *Server) createManagedModel(w http.ResponseWriter, r *http.Request) {
 	subject, ok := s.subject(w, r)
 	if !ok {

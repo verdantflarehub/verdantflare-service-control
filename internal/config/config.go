@@ -14,6 +14,8 @@ type Config struct {
 	DatabaseURL      string
 	DatabaseMaxOpen  int
 	DatabaseMaxIdle  int
+	GatewayBaseURL   string
+	GatewayToken     string
 	DevLoginSubject  string
 	TrustAuthHeaders bool
 	AllowedOrigins   []string
@@ -40,6 +42,14 @@ func Load() (Config, error) {
 	if environment == "production" && databaseURL == "" {
 		return Config{}, fmt.Errorf("CONTROL_DATABASE_URL is required in production")
 	}
+	gatewayBaseURL := strings.TrimSpace(os.Getenv("CONTROL_GATEWAY_BASE_URL"))
+	gatewayToken := strings.TrimSpace(os.Getenv("CONTROL_GATEWAY_TOKEN"))
+	if environment == "production" && strings.HasPrefix(strings.ToLower(gatewayBaseURL), "http://") {
+		return Config{}, fmt.Errorf("CONTROL_GATEWAY_BASE_URL must use HTTPS in production")
+	}
+	if (gatewayBaseURL == "") != (gatewayToken == "") {
+		return Config{}, fmt.Errorf("CONTROL_GATEWAY_BASE_URL and CONTROL_GATEWAY_TOKEN must be set together")
+	}
 
 	return Config{
 		Environment:      environment,
@@ -47,6 +57,8 @@ func Load() (Config, error) {
 		DatabaseURL:      databaseURL,
 		DatabaseMaxOpen:  positiveInt("CONTROL_DATABASE_MAX_OPEN", 5),
 		DatabaseMaxIdle:  positiveInt("CONTROL_DATABASE_MAX_IDLE", 2),
+		GatewayBaseURL:   gatewayBaseURL,
+		GatewayToken:     gatewayToken,
 		DevLoginSubject:  devSubject,
 		TrustAuthHeaders: trustHeaders,
 		AllowedOrigins:   splitCSV(os.Getenv("CONTROL_ALLOWED_ORIGINS")),

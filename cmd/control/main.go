@@ -11,6 +11,7 @@ import (
 
 	"github.com/verdantflarehub/verdantflare-service-control/internal/config"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/control"
+	"github.com/verdantflarehub/verdantflare-service-control/internal/gateway"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/httpapi"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/store"
 )
@@ -50,7 +51,15 @@ func main() {
 			}
 		}()
 	}
-	service := control.NewService(repository)
+	var modelGateway control.ModelGateway
+	if configuration.GatewayBaseURL != "" {
+		modelGateway, err = gateway.NewModelsClient(configuration.GatewayBaseURL, configuration.GatewayToken)
+		if err != nil {
+			logger.Error("invalid gateway configuration", "error", err)
+			os.Exit(1)
+		}
+	}
+	service := control.NewService(repository, modelGateway)
 	handler := httpapi.New(configuration, service, logger)
 
 	server := &http.Server{

@@ -61,6 +61,7 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("GET /api/control/ops/releases", server.listReleases)
 	mux.HandleFunc("GET /api/control/public/catalog", server.publicCatalog)
 	mux.HandleFunc("GET /api/control/ops/models", server.listManagedModels)
+	mux.HandleFunc("GET /api/control/ops/gateway-models", server.listGatewayModels)
 	mux.HandleFunc("POST /api/control/ops/models", server.createManagedModel)
 	mux.HandleFunc("PATCH /api/control/ops/models/{modelID}", server.updateManagedModel)
 	mux.HandleFunc("GET /api/control/ops/organizations", server.listOperationsOrganizations)

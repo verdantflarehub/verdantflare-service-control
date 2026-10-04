@@ -1,6 +1,8 @@
 package httpapi_test
 
 import (
+	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,9 +16,18 @@ import (
 	"github.com/verdantflarehub/verdantflare-service-control/internal/store"
 )
 
+type catalogGateway struct {
+	models map[string]struct{}
+	err    error
+}
+
+func (g *catalogGateway) ListModels(context.Context) (map[string]struct{}, error) {
+	return g.models, g.err
+}
+
 func TestPublicCatalogUsesOnlyExplicitlyPublishedDatabaseRecords(t *testing.T) {
 	repository := store.NewMemoryBootstrap()
-	service := control.NewService(repository)
+	service := control.NewService(repository, &catalogGateway{models: map[string]struct{}{"verified-model": {}}})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := httptest.NewServer(httpapi.New(config.Config{Environment: "test", DevLoginSubject: "00000000-0000-4000-8000-000000000001"}, service, logger))
 	defer server.Close()
@@ -79,6 +90,85 @@ func TestPublicCatalogUsesOnlyExplicitlyPublishedDatabaseRecords(t *testing.T) {
 	}
 }
 
+func TestPublishedModelsFollowGatewayForWWWAndHub(t *testing.T) {
+	gateway := &catalogGateway{models: map[string]struct{}{
+		"verdantflare-sd2": {}, "deepseek-flash": {}, "deepseek-v4-pro": {},
+	}}
+	service := control.NewService(store.NewMemoryBootstrap(), gateway)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := httptest.NewServer(httpapi.New(config.Config{Environment: "test", DevLoginSubject: "00000000-0000-4000-8000-000000000001"}, service, logger))
+	defer server.Close()
+
+	for _, id := range []string{"verdantflare-sd2", "deepseek-flash", "deepseek-v4-pro"} {
+		input := domain.PublicModel{ID: id, Name: "Model " + id, Provider: "Verified", Summary: "Reviewed description", Categories: []string{"文本生成"}}
+		created := request(t, server, http.MethodPost, "/api/control/ops/models", input)
+		if created.StatusCode != http.StatusCreated {
+			t.Fatalf("create %s: %d %s", id, created.StatusCode, readBody(t, created))
+		}
+		created.Body.Close()
+		input.PublicVisible = true
+		published := request(t, server, http.MethodPatch, "/api/control/ops/models/"+id, input)
+		if published.StatusCode != http.StatusOK {
+			t.Fatalf("publish %s: %d %s", id, published.StatusCode, readBody(t, published))
+		}
+		published.Body.Close()
+	}
+
+	public := request(t, server, http.MethodGet, "/api/control/public/catalog", nil)
+	var catalog domain.PublicCatalog
+	decode(t, public, &catalog)
+	public.Body.Close()
+	if len(catalog.Models) != 3 {
+		t.Fatalf("WWW models = %d, want 3", len(catalog.Models))
+	}
+	hub := request(t, server, http.MethodGet, "/api/control/api/models", nil)
+	var hubModels []domain.Model
+	decode(t, hub, &hubModels)
+	hub.Body.Close()
+	if len(hubModels) != 3 {
+		t.Fatalf("Hub models = %d, want 3", len(hubModels))
+	}
+
+	delete(gateway.models, "deepseek-v4-pro")
+	public = request(t, server, http.MethodGet, "/api/control/public/catalog", nil)
+	decode(t, public, &catalog)
+	public.Body.Close()
+	if len(catalog.Models) != 2 {
+		t.Fatalf("WWW should hide withdrawn model, got %d", len(catalog.Models))
+	}
+	hub = request(t, server, http.MethodGet, "/api/control/api/models", nil)
+	decode(t, hub, &hubModels)
+	hub.Body.Close()
+	if len(hubModels) != 2 {
+		t.Fatalf("Hub should hide withdrawn model, got %d", len(hubModels))
+	}
+
+	gateway.err = errors.New("upstream unavailable")
+	for _, path := range []string{"/api/control/public/catalog", "/api/control/api/models"} {
+		response := request(t, server, http.MethodGet, path, nil)
+		if response.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("%s must fail closed, got %d", path, response.StatusCode)
+		}
+		response.Body.Close()
+	}
+}
+
+func TestCannotPublishModelAbsentFromGateway(t *testing.T) {
+	service := control.NewService(store.NewMemoryBootstrap(), &catalogGateway{models: map[string]struct{}{}})
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := httptest.NewServer(httpapi.New(config.Config{Environment: "test", DevLoginSubject: "00000000-0000-4000-8000-000000000001"}, service, logger))
+	defer server.Close()
+	input := domain.PublicModel{ID: "not-in-gateway", Name: "Missing Model", Provider: "Provider", Summary: "Description", Categories: []string{"文本生成"}}
+	created := request(t, server, http.MethodPost, "/api/control/ops/models", input)
+	created.Body.Close()
+	input.PublicVisible = true
+	response := request(t, server, http.MethodPatch, "/api/control/ops/models/not-in-gateway", input)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("publish missing model = %d, want 409", response.StatusCode)
+	}
+}
+
 func TestModelAdminRequiresRoleButPublicReadDoesNot(t *testing.T) {
 	server := newTestServer(t, config.Config{})
 	public := request(t, server, http.MethodGet, "/api/control/public/catalog", nil)
@@ -90,6 +180,11 @@ func TestModelAdminRequiresRoleButPublicReadDoesNot(t *testing.T) {
 	defer private.Body.Close()
 	if private.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("private status = %d", private.StatusCode)
+	}
+	gateway := request(t, server, http.MethodGet, "/api/control/ops/gateway-models", nil)
+	defer gateway.Body.Close()
+	if gateway.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("gateway status = %d", gateway.StatusCode)
 	}
 }
 
@@ -104,5 +199,10 @@ func TestModelAdminRoleRecheckedAfterOrganizationSwitch(t *testing.T) {
 	defer private.Body.Close()
 	if private.StatusCode != http.StatusForbidden {
 		t.Fatalf("private status = %d, want 403", private.StatusCode)
+	}
+	gateway := request(t, server, http.MethodGet, "/api/control/ops/gateway-models", nil)
+	defer gateway.Body.Close()
+	if gateway.StatusCode != http.StatusForbidden {
+		t.Fatalf("gateway status = %d, want 403", gateway.StatusCode)
 	}
 }
