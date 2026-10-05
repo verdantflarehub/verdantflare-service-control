@@ -139,6 +139,7 @@ type ModelExperienceRun struct {
 	PromptTokens   int        `json:"promptTokens,omitempty"`
 	OutputTokens   int        `json:"outputTokens,omitempty"`
 	TotalTokens    int        `json:"totalTokens,omitempty"`
+	BilledQuota    *int       `json:"billedQuota,omitempty"`
 	CreatedAt      time.Time  `json:"createdAt"`
 	CompletedAt    *time.Time `json:"completedAt,omitempty"`
 	ExpiresAt      time.Time  `json:"expiresAt"`

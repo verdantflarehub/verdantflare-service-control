@@ -124,7 +124,7 @@ func (s *Service) executeModelExperienceRun(run domain.ModelExperienceRun) {
 	finishCtx, finishCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer finishCancel()
 	if _, finishErr := s.repository.FinishModelExperienceRun(finishCtx, run.OrganizationID, run.CenterUserID, run.ID,
-		status, response, errorCode, result.PromptTokens, result.OutputTokens, result.TotalTokens); finishErr != nil {
+		status, response, errorCode, result.PromptTokens, result.OutputTokens, result.TotalTokens, result.BilledQuota); finishErr != nil {
 		slog.Error("persist model experience outcome failed", "run_id", run.ID, "error", finishErr)
 	}
 }

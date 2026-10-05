@@ -69,7 +69,7 @@ func (m *Memory) CreateModelExperienceRun(_ context.Context, run domain.ModelExp
 	return run, true, nil
 }
 
-func (m *Memory) FinishModelExperienceRun(_ context.Context, organizationID, centerUserID, runID, status, response, errorCode string, promptTokens, outputTokens, totalTokens int) (domain.ModelExperienceRun, error) {
+func (m *Memory) FinishModelExperienceRun(_ context.Context, organizationID, centerUserID, runID, status, response, errorCode string, promptTokens, outputTokens, totalTokens int, billedQuota *int) (domain.ModelExperienceRun, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	run, ok := m.modelRuns[runID]
@@ -86,6 +86,10 @@ func (m *Memory) FinishModelExperienceRun(_ context.Context, organizationID, cen
 	run.PromptTokens = promptTokens
 	run.OutputTokens = outputTokens
 	run.TotalTokens = totalTokens
+	if status == "completed" && billedQuota != nil && *billedQuota >= 0 {
+		quota := *billedQuota
+		run.BilledQuota = &quota
+	}
 	run.CompletedAt = &now
 	m.modelRuns[runID] = run
 	return run, nil
@@ -142,10 +146,10 @@ func (p *Postgres) CreateModelExperienceRun(ctx context.Context, run domain.Mode
 	return
 }
 
-func (p *Postgres) FinishModelExperienceRun(ctx context.Context, organizationID, centerUserID, runID, status, response, errorCode string, promptTokens, outputTokens, totalTokens int) (result domain.ModelExperienceRun, err error) {
+func (p *Postgres) FinishModelExperienceRun(ctx context.Context, organizationID, centerUserID, runID, status, response, errorCode string, promptTokens, outputTokens, totalTokens int, billedQuota *int) (result domain.ModelExperienceRun, err error) {
 	err = p.mutate(ctx, func(m *Memory) error {
 		var e error
-		result, e = m.FinishModelExperienceRun(ctx, organizationID, centerUserID, runID, status, response, errorCode, promptTokens, outputTokens, totalTokens)
+		result, e = m.FinishModelExperienceRun(ctx, organizationID, centerUserID, runID, status, response, errorCode, promptTokens, outputTokens, totalTokens, billedQuota)
 		return e
 	})
 	return

@@ -48,8 +48,9 @@ func TestModelExperienceRunIdempotencyIsolationAndCleanup(t *testing.T) {
 	if _, err := repository.GetModelExperienceRun(ctx, "org_other", run.CenterUserID, run.ID); err == nil {
 		t.Fatal("another organization read the run")
 	}
-	finished, err := repository.FinishModelExperienceRun(ctx, run.OrganizationID, run.CenterUserID, run.ID, "completed", "真实回答", "", 3, 4, 7)
-	if err != nil || finished.Response != "真实回答" || finished.TotalTokens != 7 {
+	quota := 362
+	finished, err := repository.FinishModelExperienceRun(ctx, run.OrganizationID, run.CenterUserID, run.ID, "completed", "真实回答", "", 3, 4, 7, &quota)
+	if err != nil || finished.Response != "真实回答" || finished.TotalTokens != 7 || finished.BilledQuota == nil || *finished.BilledQuota != quota {
 		t.Fatalf("finish: %+v %v", finished, err)
 	}
 	if err := repository.SweepModelExperienceRuns(ctx, now.Add(25*time.Hour)); err != nil {

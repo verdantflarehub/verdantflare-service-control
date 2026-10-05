@@ -82,7 +82,8 @@ func (f *accountGatewayFixture) ExperienceChat(_ context.Context, _ string, mode
 	if f.chatErr != nil {
 		return gateway.CenterChatResult{}, f.chatErr
 	}
-	return gateway.CenterChatResult{Response: "真实上游响应", PromptTokens: 12, OutputTokens: 8, TotalTokens: 20}, nil
+	quota := 362
+	return gateway.CenterChatResult{Response: "真实上游响应", PromptTokens: 12, OutputTokens: 8, TotalTokens: 20, BilledQuota: &quota}, nil
 }
 
 func TestAPIKeyCreditAndReadOnlyProbeHTTPFlow(t *testing.T) {

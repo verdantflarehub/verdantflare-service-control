@@ -40,7 +40,10 @@ func TestCenterClientUsesAuthenticatedOrganizationPaths(t *testing.T) {
 			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil || payload.ModelID != "deepseek-v4-pro" || payload.Prompt != "你好" {
 				t.Errorf("unexpected experience request: %+v %v", payload, err)
 			}
+			writer.Header().Set("X-Oneapi-Request-Id", "202610051016420000000000000001")
 			_, _ = writer.Write([]byte(`{"choices":[{"message":{"content":"已生成的回答"}}],"usage":{"prompt_tokens":8,"completion_tokens":12,"total_tokens":20}}`))
+		case "GET /api/internal/center/organizations/org_alpha/experience/charges/202610051016420000000000000001":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"billedQuota":362}}`))
 		case "POST /api/internal/center/organizations/org_alpha/keys/1/revoke", "PUT /api/internal/center/organizations/org_alpha/status":
 			_, _ = writer.Write([]byte(`{"success":true}`))
 		default:
@@ -75,11 +78,31 @@ func TestCenterClientUsesAuthenticatedOrganizationPaths(t *testing.T) {
 	if err := client.SetEnabled(ctx, "org_alpha", false); err != nil {
 		t.Fatal(err)
 	}
-	if result, err := client.ExperienceChat(ctx, "org_alpha", "deepseek-v4-pro", "你好"); err != nil || result.Response != "已生成的回答" || result.TotalTokens != 20 {
+	if result, err := client.ExperienceChat(ctx, "org_alpha", "deepseek-v4-pro", "你好"); err != nil || result.Response != "已生成的回答" || result.TotalTokens != 20 || result.BilledQuota == nil || *result.BilledQuota != 362 {
 		t.Fatalf("experience chat: %+v %v", result, err)
 	}
-	if len(seen) != 8 {
+	if len(seen) != 9 {
 		t.Fatalf("missing bridge calls: %v", seen)
+	}
+}
+
+func TestCenterClientDoesNotInventChargeWhenLogIsMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodPost {
+			writer.Header().Set("X-Oneapi-Request-Id", "202610051016420000000000000002")
+			_, _ = writer.Write([]byte(`{"choices":[{"message":{"content":"真实回答"}}],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`))
+			return
+		}
+		writer.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+	client, err := NewCenterClient(server.URL, "service-token-with-at-least-thirty-two-characters")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.ExperienceChat(context.Background(), "org_alpha", "deepseek-flash", "你好")
+	if err != nil || result.Response != "真实回答" || result.BilledQuota != nil {
+		t.Fatalf("missing charge must not be estimated: %+v %v", result, err)
 	}
 }
 

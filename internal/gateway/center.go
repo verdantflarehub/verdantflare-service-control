@@ -66,6 +66,7 @@ type CenterChatResult struct {
 	PromptTokens int
 	OutputTokens int
 	TotalTokens  int
+	BilledQuota  *int
 }
 
 func NewCenterClient(baseURL, token string) (*CenterClient, error) {
@@ -196,6 +197,15 @@ func (c *CenterClient) ExperienceChat(ctx context.Context, organizationID, model
 		result.Usage.PromptTokens < 1 || result.Usage.OutputTokens < 0 || result.Usage.TotalTokens < result.Usage.PromptTokens {
 		return CenterChatResult{}, errors.New("invalid center experience response")
 	}
-	return CenterChatResult{Response: result.Choices[0].Message.Content, PromptTokens: result.Usage.PromptTokens,
-		OutputTokens: result.Usage.OutputTokens, TotalTokens: result.Usage.TotalTokens}, nil
+	chat := CenterChatResult{Response: result.Choices[0].Message.Content, PromptTokens: result.Usage.PromptTokens,
+		OutputTokens: result.Usage.OutputTokens, TotalTokens: result.Usage.TotalTokens}
+	if requestID := response.Header.Get("X-Oneapi-Request-Id"); requestID != "" {
+		var charge struct {
+			BilledQuota int `json:"billedQuota"`
+		}
+		if err := c.request(ctx, http.MethodGet, centerPath(organizationID)+"/experience/charges/"+url.PathEscape(requestID), nil, &charge); err == nil && charge.BilledQuota >= 0 {
+			chat.BilledQuota = &charge.BilledQuota
+		}
+	}
+	return chat, nil
 }
