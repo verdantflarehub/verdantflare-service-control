@@ -36,6 +36,7 @@ type ModelGateway interface {
 type GatewayAccounts interface {
 	Balance(context.Context, string) (gateway.CenterBalance, error)
 	Grant(context.Context, string, string, string, int) (gateway.CenterBalance, error)
+	ListCreditGrants(context.Context, string) ([]gateway.CenterCreditGrant, error)
 	SetEnabled(context.Context, string, bool) error
 	ListKeys(context.Context, string) ([]gateway.CenterKey, error)
 	CreateKey(context.Context, string, string, string, []string, int) (gateway.CenterCreatedKey, error)
@@ -321,14 +322,20 @@ func (s *Service) Usage(ctx context.Context, subject string) (domain.UsageSummar
 	if err != nil {
 		return domain.UsageSummary{}, gatewayAccountError(err)
 	}
-	budget := float64(balance.RemainingQuota+balance.UsedQuota) / 500000
+	return usageFromGatewayBalance(balance), nil
+}
+
+func usageFromGatewayBalance(balance gateway.CenterBalance) domain.UsageSummary {
+	budgetQuota := balance.RemainingQuota + balance.UsedQuota
+	budget := float64(budgetQuota) / 500000
 	used := float64(balance.UsedQuota) / 500000
 	remaining := float64(balance.RemainingQuota) / 500000
 	percentage := 0.0
 	if budget > 0 {
 		percentage = used / budget * 100
 	}
-	return domain.UsageSummary{Budget: budget, Used: used, Remaining: remaining, Enabled: balance.Enabled, Percentage: percentage, ByModel: map[string]int{}}, nil
+	return domain.UsageSummary{BudgetQuota: budgetQuota, UsedQuota: balance.UsedQuota, RemainingQuota: balance.RemainingQuota,
+		Budget: budget, Used: used, Remaining: remaining, Enabled: balance.Enabled, Percentage: percentage, ByModel: map[string]int{}}
 }
 
 func (s *Service) Organization(ctx context.Context, subject string) (domain.Organization, error) {
@@ -375,15 +382,30 @@ func (s *Service) InviteMember(ctx context.Context, subject string, input Invite
 	return s.createMember(ctx, organization.OrganizationID, input)
 }
 
-func (s *Service) Billing(ctx context.Context, subject string) (domain.BillingSummary, error) {
-	_, roles, _, err := s.activeOrganization(ctx, subject)
+func (s *Service) Billing(ctx context.Context, subject string) (domain.BillingView, error) {
+	organization, roles, _, err := s.activeOrganization(ctx, subject)
 	if err != nil {
-		return domain.BillingSummary{}, err
+		return domain.BillingView{}, err
 	}
 	if !hasAnyRole(roles, "organization_admin", "billing_viewer") {
-		return domain.BillingSummary{}, domain.NewError(403, "billing_forbidden", "当前角色不能查看账单")
+		return domain.BillingView{}, domain.NewError(403, "billing_forbidden", "当前角色不能查看账单")
 	}
-	return domain.BillingSummary{}, domain.NewError(503, "billing_unavailable", "真实账单数据尚未接入")
+	if s.accountGateway == nil {
+		return domain.BillingView{}, domain.NewError(503, "gateway_accounts_unconfigured", "模型网关账号服务尚未配置")
+	}
+	balance, err := s.accountGateway.Balance(ctx, organization.OrganizationID)
+	if err != nil {
+		return domain.BillingView{}, gatewayAccountError(err)
+	}
+	grants, err := s.accountGateway.ListCreditGrants(ctx, organization.OrganizationID)
+	if err != nil {
+		return domain.BillingView{}, gatewayAccountError(err)
+	}
+	creditGrants := make([]domain.CreditGrant, 0, len(grants))
+	for _, grant := range grants {
+		creditGrants = append(creditGrants, domain.CreditGrant{ID: grant.ID, AmountCents: grant.AmountCents, CreatedAt: grant.CreatedAt})
+	}
+	return domain.BillingView{Plan: organization.Plan, Usage: usageFromGatewayBalance(balance), CreditGrants: creditGrants}, nil
 }
 
 func (s *Service) ListReleases(ctx context.Context, subject string) ([]domain.Release, error) {

@@ -41,6 +41,37 @@ func (s *Server) updateManagedApp(w http.ResponseWriter, r *http.Request) {
 	s.respond(w, r, result, err, http.StatusOK)
 }
 
+func (s *Server) createAppVersion(w http.ResponseWriter, r *http.Request) {
+	subject, ok := s.subject(w, r)
+	if !ok {
+		return
+	}
+	var input control.CreateAppVersionInput
+	if !s.decode(w, r, &input) {
+		return
+	}
+	result, err := s.service.CreateAppVersion(r.Context(), subject, r.PathValue("appID"), input)
+	s.respond(w, r, result, err, http.StatusCreated)
+}
+
+func (s *Server) listAppVersions(w http.ResponseWriter, r *http.Request) {
+	subject, ok := s.subject(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.service.ListAppVersions(r.Context(), subject, r.PathValue("appID"))
+	s.respond(w, r, result, err, http.StatusOK)
+}
+
+func (s *Server) getAppVersion(w http.ResponseWriter, r *http.Request) {
+	subject, ok := s.subject(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.service.AppVersion(r.Context(), subject, r.PathValue("appID"), r.PathValue("version"))
+	s.respond(w, r, result, err, http.StatusOK)
+}
+
 func (s *Server) createManagedOrganization(w http.ResponseWriter, r *http.Request) {
 	subject, ok := s.subject(w, r)
 	if !ok {

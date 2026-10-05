@@ -21,6 +21,8 @@ import (
 type accountGatewayFixture struct {
 	balances  map[string]gateway.CenterBalance
 	keys      map[string][]gateway.CenterKey
+	credits   map[string][]gateway.CenterCreditGrant
+	creditErr error
 	grants    map[string]bool
 	probes    int
 	chatCalls atomic.Int32
@@ -29,7 +31,7 @@ type accountGatewayFixture struct {
 }
 
 func newAccountGatewayFixture() *accountGatewayFixture {
-	return &accountGatewayFixture{balances: map[string]gateway.CenterBalance{}, keys: map[string][]gateway.CenterKey{}, grants: map[string]bool{}}
+	return &accountGatewayFixture{balances: map[string]gateway.CenterBalance{}, keys: map[string][]gateway.CenterKey{}, credits: map[string][]gateway.CenterCreditGrant{}, grants: map[string]bool{}}
 }
 func (f *accountGatewayFixture) Balance(_ context.Context, org string) (gateway.CenterBalance, error) {
 	return f.balances[org], nil
@@ -41,8 +43,12 @@ func (f *accountGatewayFixture) Grant(_ context.Context, org, id, _ string, amou
 		balance.Enabled = true
 		f.balances[org] = balance
 		f.grants[id] = true
+		f.credits[org] = append(f.credits[org], gateway.CenterCreditGrant{ID: id, AmountCents: amount, CreatedAt: time.Date(2026, 10, 4, 11, 34, 49, 0, time.UTC)})
 	}
 	return f.balances[org], nil
+}
+func (f *accountGatewayFixture) ListCreditGrants(_ context.Context, org string) ([]gateway.CenterCreditGrant, error) {
+	return f.credits[org], f.creditErr
 }
 func (f *accountGatewayFixture) SetEnabled(_ context.Context, org string, enabled bool) error {
 	balance := f.balances[org]
@@ -121,6 +127,23 @@ func TestAPIKeyCreditAndReadOnlyProbeHTTPFlow(t *testing.T) {
 			t.Fatalf("grant was not retry-safe: %+v", balance)
 		}
 	}
+	billingResponse := request(t, server, http.MethodGet, "/api/control/settings/billing", nil)
+	if billingResponse.StatusCode != http.StatusOK {
+		t.Fatalf("billing: %d %s", billingResponse.StatusCode, readBody(t, billingResponse))
+	}
+	var billing domain.BillingView
+	decode(t, billingResponse, &billing)
+	billingResponse.Body.Close()
+	if billing.Usage.BudgetQuota != 615000 || billing.Usage.RemainingQuota != 615000 || billing.Usage.UsedQuota != 0 || len(billing.CreditGrants) != 1 || billing.CreditGrants[0].AmountCents != 123 {
+		t.Fatalf("billing must use gateway balance and one idempotent grant: %+v", billing)
+	}
+	accounts.creditErr = gateway.CenterHTTPError{Status: http.StatusInternalServerError}
+	billingUnavailable := request(t, server, http.MethodGet, "/api/control/settings/billing", nil)
+	if billingUnavailable.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("billing must fail closed without the ledger: %d %s", billingUnavailable.StatusCode, readBody(t, billingUnavailable))
+	}
+	billingUnavailable.Body.Close()
+	accounts.creditErr = nil
 	keyPath := "/api/control/api-keys"
 	created := request(t, server, http.MethodPost, keyPath, map[string]any{"name": "Production", "scopes": []string{"deepseek-flash"}, "expiresInDays": 30, "requestId": "key_test_request_001"})
 	if created.StatusCode != http.StatusCreated {

@@ -33,6 +33,12 @@ type CenterBalance struct {
 	Enabled        bool `json:"enabled"`
 }
 
+type CenterCreditGrant struct {
+	ID          string    `json:"id"`
+	AmountCents int       `json:"amountCents"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
 type CenterKey struct {
 	ID         int      `json:"id"`
 	Name       string   `json:"name"`
@@ -131,6 +137,12 @@ func (c *CenterClient) Grant(ctx context.Context, organizationID, requestID, act
 	err := c.request(ctx, http.MethodPost, centerPath(organizationID)+"/credit-grants", map[string]any{
 		"requestId": requestID, "actor": actor, "amountCents": amountCents,
 	}, &result)
+	return result, err
+}
+
+func (c *CenterClient) ListCreditGrants(ctx context.Context, organizationID string) ([]CenterCreditGrant, error) {
+	var result []CenterCreditGrant
+	err := c.request(ctx, http.MethodGet, centerPath(organizationID)+"/credit-grants", nil, &result)
 	return result, err
 }
 

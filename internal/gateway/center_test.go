@@ -25,6 +25,8 @@ func TestCenterClientUsesAuthenticatedOrganizationPaths(t *testing.T) {
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"remainingQuota":500000,"usedQuota":0,"enabled":true}}`))
 		case "POST /api/internal/center/organizations/org_alpha/credit-grants":
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"remainingQuota":1000000,"usedQuota":0,"enabled":true}}`))
+		case "GET /api/internal/center/organizations/org_alpha/credit-grants":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[{"id":"request_id_1234567890","amountCents":100,"createdAt":"2026-10-04T11:34:49Z"}]}`))
 		case "GET /api/internal/center/organizations/org_alpha/keys":
 			_, _ = writer.Write([]byte(`{"success":true,"data":[{"id":1,"name":"test","status":"active"}]}`))
 		case "POST /api/internal/center/organizations/org_alpha/keys":
@@ -63,6 +65,9 @@ func TestCenterClientUsesAuthenticatedOrganizationPaths(t *testing.T) {
 	if balance, err := client.Grant(ctx, "org_alpha", "request_id_1234567890", "admin", 100); err != nil || balance.RemainingQuota != 1000000 {
 		t.Fatalf("grant: %+v %v", balance, err)
 	}
+	if grants, err := client.ListCreditGrants(ctx, "org_alpha"); err != nil || len(grants) != 1 || grants[0].AmountCents != 100 {
+		t.Fatalf("credit grants: %+v %v", grants, err)
+	}
 	if keys, err := client.ListKeys(ctx, "org_alpha"); err != nil || len(keys) != 1 {
 		t.Fatalf("keys: %+v %v", keys, err)
 	}
@@ -81,7 +86,7 @@ func TestCenterClientUsesAuthenticatedOrganizationPaths(t *testing.T) {
 	if result, err := client.ExperienceChat(ctx, "org_alpha", "deepseek-v4-pro", "你好"); err != nil || result.Response != "已生成的回答" || result.TotalTokens != 20 || result.BilledQuota == nil || *result.BilledQuota != 362 {
 		t.Fatalf("experience chat: %+v %v", result, err)
 	}
-	if len(seen) != 9 {
+	if len(seen) != 10 {
 		t.Fatalf("missing bridge calls: %v", seen)
 	}
 }

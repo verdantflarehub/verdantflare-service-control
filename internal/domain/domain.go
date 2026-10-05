@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type CenterUser struct {
 	CenterUserID         string
@@ -207,6 +210,19 @@ type BillingSummary struct {
 	Invoices       []Invoice `json:"invoices"`
 }
 
+// BillingView never represents a credit grant as a paid invoice.
+type BillingView struct {
+	Plan         string        `json:"plan"`
+	Usage        UsageSummary  `json:"usage"`
+	CreditGrants []CreditGrant `json:"creditGrants"`
+}
+
+type CreditGrant struct {
+	ID          string    `json:"id"`
+	AmountCents int       `json:"amountCents"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
 type Invoice struct {
 	Period string `json:"period"`
 	ID     string `json:"id"`
@@ -230,6 +246,55 @@ type ManagedApp struct {
 	Release Release `json:"release"`
 }
 
+// AppVersion is a sealed Center candidate, not a Station installation record.
+// Manifest and image references are content-addressed at creation; publishing
+// and Station registration remain separate decisions.
+type AppVersion struct {
+	AppID           string            `json:"appId"`
+	Version         string            `json:"version"`
+	UpstreamVersion string            `json:"upstreamVersion,omitempty"`
+	Publisher       string            `json:"publisher"`
+	SourceURL       string            `json:"sourceUrl"`
+	SourceRevision  string            `json:"sourceRevision"`
+	LicenseID       string            `json:"licenseId"`
+	LicenseURL      string            `json:"licenseUrl"`
+	ManifestRef     string            `json:"manifestRef"`
+	ManifestSHA256  string            `json:"manifestSha256"`
+	Manifest        json.RawMessage   `json:"manifest,omitempty"`
+	Artifacts       []AppArtifact     `json:"artifacts"`
+	Dependencies    []AppDependency   `json:"dependencies"`
+	Permissions     []AppPermission   `json:"permissions"`
+	Validation      []ValidationCheck `json:"validation"`
+	Status          string            `json:"status"`
+	CreatedAt       time.Time         `json:"createdAt"`
+}
+
+type AppArtifact struct {
+	Component string `json:"component"`
+	Ref       string `json:"ref"`
+	SHA256    string `json:"sha256"`
+}
+
+type AppDependency struct {
+	Kind      string `json:"kind"`
+	ID        string `json:"id"`
+	Version   string `json:"version"`
+	SourceURL string `json:"sourceUrl"`
+	LicenseID string `json:"licenseId"`
+	SHA256    string `json:"sha256"`
+}
+
+type AppPermission struct {
+	Scope  string `json:"scope"`
+	Reason string `json:"reason"`
+}
+
+type ValidationCheck struct {
+	Code   string `json:"code"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+}
+
 type ManagedOrganization struct {
 	Organization Organization `json:"organization"`
 	Apps         []App        `json:"apps"`
@@ -249,10 +314,13 @@ type OperationsOrganization struct {
 }
 
 type UsageSummary struct {
-	Budget     float64        `json:"budget"`
-	Used       float64        `json:"used"`
-	Remaining  float64        `json:"remaining"`
-	Enabled    bool           `json:"enabled"`
-	Percentage float64        `json:"percentage"`
-	ByModel    map[string]int `json:"byModel"`
+	BudgetQuota    int            `json:"budgetQuota"`
+	UsedQuota      int            `json:"usedQuota"`
+	RemainingQuota int            `json:"remainingQuota"`
+	Budget         float64        `json:"budget"`
+	Used           float64        `json:"used"`
+	Remaining      float64        `json:"remaining"`
+	Enabled        bool           `json:"enabled"`
+	Percentage     float64        `json:"percentage"`
+	ByModel        map[string]int `json:"byModel"`
 }

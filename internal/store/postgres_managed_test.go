@@ -48,6 +48,14 @@ func TestManagedAppSurvivesPostgresReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	versionManifest := []byte(fmt.Sprintf(`{"app_id":%q}`, id))
+	versionHash := sha256.Sum256(versionManifest)
+	versionDigest := fmt.Sprintf("%x", versionHash)
+	_, err = first.CreateAppVersion(ctx, domain.AppVersion{AppID: id, Version: "0.2.0", ManifestRef: "center-manifest://sha256/" + versionDigest,
+		ManifestSHA256: versionDigest, Manifest: versionManifest, Status: "center_recorded", CreatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	modelID := fmt.Sprintf("catalog-%d", time.Now().UnixNano())
 	_, err = first.CreateManagedModel(ctx, domain.PublicModel{ID: modelID, Name: "Catalog Persistence", Provider: "Provider", Summary: "Reviewed", Categories: []string{"文本生成"}})
 	if err != nil {
@@ -105,6 +113,10 @@ func TestManagedAppSurvivesPostgresReopen(t *testing.T) {
 	app, err := second.ManagedApp(ctx, id)
 	if err != nil || app.App.Channel != "Preview" {
 		t.Fatalf("reloaded app = %+v, error = %v", app, err)
+	}
+	reloadedVersion, err := second.AppVersion(ctx, id, "0.2.0")
+	if err != nil || reloadedVersion.ManifestSHA256 != versionDigest || reloadedVersion.Status != "center_recorded" {
+		t.Fatalf("candidate version did not survive reopen: %+v %v", reloadedVersion, err)
 	}
 	market, err := second.ListApps(ctx, "org_northshore")
 	if err != nil {

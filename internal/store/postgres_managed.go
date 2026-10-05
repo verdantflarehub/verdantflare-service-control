@@ -24,6 +24,27 @@ func (p *Postgres) UpdateManagedApp(ctx context.Context, id string, app domain.A
 	return
 }
 
+func (p *Postgres) CreateAppVersion(ctx context.Context, version domain.AppVersion) (result domain.AppVersion, err error) {
+	err = p.mutate(ctx, func(m *Memory) error { var e error; result, e = m.CreateAppVersion(ctx, version); return e })
+	return
+}
+
+func (p *Postgres) ListAppVersions(ctx context.Context, appID string) ([]domain.AppVersion, error) {
+	m, err := p.read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return m.ListAppVersions(ctx, appID)
+}
+
+func (p *Postgres) AppVersion(ctx context.Context, appID, version string) (domain.AppVersion, error) {
+	m, err := p.read(ctx)
+	if err != nil {
+		return domain.AppVersion{}, err
+	}
+	return m.AppVersion(ctx, appID, version)
+}
+
 func (p *Postgres) CreateManagedOrganization(ctx context.Context, organization domain.Organization) (result domain.ManagedOrganization, err error) {
 	err = p.mutate(ctx, func(m *Memory) error {
 		var e error

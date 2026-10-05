@@ -18,6 +18,7 @@ type Memory struct {
 	users         map[string]domain.CenterUser
 	organizations map[string]domain.Organization
 	apps          map[string]domain.App
+	appVersions   map[string]map[string]domain.AppVersion
 	entitlements  map[string]map[string]bool
 	sessions      map[string]domain.ExperienceSession
 	modelRuns     map[string]domain.ModelExperienceRun
@@ -45,7 +46,7 @@ func NewMemoryBootstrap() *Memory {
 			},
 		},
 		organizations: map[string]domain.Organization{organizationID: {OrganizationID: organizationID, Name: "VerdantFlare", ShortName: "VF", EntitlementVersion: 1, Status: "正常"}},
-		apps:          map[string]domain.App{}, entitlements: map[string]map[string]bool{organizationID: {}},
+		apps:          map[string]domain.App{}, appVersions: map[string]map[string]domain.AppVersion{}, entitlements: map[string]map[string]bool{organizationID: {}},
 		sessions: map[string]domain.ExperienceSession{}, apiKeys: map[string]domain.APIKey{},
 		modelRuns: map[string]domain.ModelExperienceRun{},
 		models:    []domain.Model{}, publicModels: map[string]domain.PublicModel{}, tasks: []domain.APITask{}, members: map[string][]domain.Member{},

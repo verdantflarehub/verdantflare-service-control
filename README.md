@@ -75,7 +75,7 @@ CONTROL_TRUST_AUTH_HEADERS=true
 | GET/PATCH | `/api/control/settings/organization` | 组织资料 |
 | GET/POST | `/api/control/settings/members` | 成员列表和邀请 |
 | PATCH | `/api/control/settings/members/{id}` | 更新当前组织成员角色和状态 |
-| GET | `/api/control/settings/billing` | 账单摘要 |
+| GET | `/api/control/settings/billing` | 套餐标签、网关实际额度与管理员赠送额度流水；付费账单尚未接入 |
 | GET | `/api/control/ops/releases` | 应用发布运营 |
 | GET | `/api/control/public/catalog` | 匿名公开模型与应用目录，仅包含公开字段 |
 | GET/POST | `/api/control/ops/models` | 查看、新建模型公开资料，需 `api_ops_admin` |
