@@ -23,6 +23,7 @@ type persistedState struct {
 	Organizations map[string]domain.Organization          `json:"organizations"`
 	Apps          map[string]domain.App                   `json:"apps"`
 	AppVersions   map[string]map[string]domain.AppVersion `json:"appVersions"`
+	StationGrants map[string]domain.StationTestGrant      `json:"stationGrants"`
 	Entitlements  map[string]map[string]bool              `json:"entitlements"`
 	Sessions      map[string]domain.ExperienceSession     `json:"sessions"`
 	ModelRuns     map[string]domain.ModelExperienceRun    `json:"modelRuns"`
@@ -121,7 +122,7 @@ func encodeMemory(m *Memory) ([]byte, error) {
 		keys[id] = persistedAPIKey{APIKey: key, SecretHash: key.SecretHash}
 	}
 	raw, err := json.Marshal(persistedState{
-		Users: m.users, Organizations: m.organizations, Apps: m.apps, AppVersions: m.appVersions, Entitlements: m.entitlements,
+		Users: m.users, Organizations: m.organizations, Apps: m.apps, AppVersions: m.appVersions, StationGrants: m.stationGrants, Entitlements: m.entitlements,
 		Sessions: m.sessions, ModelRuns: m.modelRuns, APIKeys: keys, Models: m.models, PublicModels: m.publicModels, Tasks: m.tasks,
 		Members: m.members, Billing: m.billing, Releases: m.releases, OpsOrgs: m.opsOrgs,
 	})
@@ -146,7 +147,7 @@ func decodeMemory(raw []byte) (*Memory, error) {
 		keys[id] = key
 	}
 	return &Memory{
-		users: state.Users, organizations: state.Organizations, apps: state.Apps, appVersions: state.AppVersions,
+		users: state.Users, organizations: state.Organizations, apps: state.Apps, appVersions: state.AppVersions, stationGrants: state.StationGrants,
 		entitlements: state.Entitlements, sessions: state.Sessions, modelRuns: state.ModelRuns, apiKeys: keys,
 		models: state.Models, publicModels: state.PublicModels, tasks: state.Tasks, members: state.Members, billing: state.Billing,
 		releases: state.Releases, opsOrgs: state.OpsOrgs,

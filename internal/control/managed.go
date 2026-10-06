@@ -17,6 +17,7 @@ var appIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
 type ManagedAppInput struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
+	GroupID       string `json:"groupId"`
 	Category      string `json:"category"`
 	Summary       string `json:"summary"`
 	Version       string `json:"version"`
@@ -64,11 +65,17 @@ func (s *Service) requireOperationsRole(ctx context.Context, subject, role strin
 }
 
 func validateManagedApp(input ManagedAppInput) error {
-	if utf8.RuneCountInString(strings.TrimSpace(input.Name)) < 2 || strings.TrimSpace(input.Version) == "" {
-		return domain.NewError(400, "app_invalid", "应用名称至少 2 个字符，版本不能为空")
+	if utf8.RuneCountInString(strings.TrimSpace(input.Name)) < 2 {
+		return domain.NewError(400, "app_invalid", "应用名称至少 2 个字符")
 	}
 	if !slices.Contains([]string{"Candidate", "Preview", "Stable", "Paused"}, input.Channel) {
 		return domain.NewError(400, "channel_invalid", "不支持的发布通道")
+	}
+	if input.GroupID != "" && !slices.Contains([]string{"image", "music", "video"}, input.GroupID) {
+		return domain.NewError(400, "app_group_invalid", "应用分组须为 image、music 或 video")
+	}
+	if slices.Contains([]string{"Preview", "Stable"}, input.Channel) && strings.TrimSpace(input.Version) == "" {
+		return domain.NewError(400, "app_version_required", "公开或预览应用的目录版本不能为空；资料草稿可以留空")
 	}
 	if input.PublicIconURL != "" {
 		parsed, err := url.Parse(input.PublicIconURL)
@@ -87,7 +94,7 @@ func appFromInput(input ManagedAppInput) domain.App {
 	if tone == "" {
 		tone = "mint"
 	}
-	return domain.App{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), Category: strings.TrimSpace(input.Category), Summary: strings.TrimSpace(input.Summary), Version: strings.TrimSpace(input.Version), GPU: strings.TrimSpace(input.GPU), Duration: strings.TrimSpace(input.Duration), Icon: icon, Tone: tone, Channel: input.Channel, Developer: strings.TrimSpace(input.Developer), Description: strings.TrimSpace(input.Description), Memory: strings.TrimSpace(input.Memory), Disk: strings.TrimSpace(input.Disk), CPU: strings.TrimSpace(input.CPU), PublicIconURL: strings.TrimSpace(input.PublicIconURL), PublicVisible: input.PublicVisible}
+	return domain.App{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), GroupID: input.GroupID, Category: strings.TrimSpace(input.Category), Summary: strings.TrimSpace(input.Summary), Version: strings.TrimSpace(input.Version), GPU: strings.TrimSpace(input.GPU), Duration: strings.TrimSpace(input.Duration), Icon: icon, Tone: tone, Channel: input.Channel, Developer: strings.TrimSpace(input.Developer), Description: strings.TrimSpace(input.Description), Memory: strings.TrimSpace(input.Memory), Disk: strings.TrimSpace(input.Disk), CPU: strings.TrimSpace(input.CPU), PublicIconURL: strings.TrimSpace(input.PublicIconURL), PublicVisible: input.PublicVisible}
 }
 
 func (s *Service) CreateManagedApp(ctx context.Context, subject string, input ManagedAppInput) (domain.ManagedApp, error) {
@@ -97,6 +104,9 @@ func (s *Service) CreateManagedApp(ctx context.Context, subject string, input Ma
 	input.ID = strings.TrimSpace(input.ID)
 	input.Channel = "Candidate"
 	input.PublicVisible = false
+	if input.GroupID != "" && strings.TrimSpace(input.Version) != "" {
+		return domain.ManagedApp{}, domain.NewError(400, "app_version_not_registered", "新应用须先登记候选版本，再选择目录展示版本")
+	}
 	if !appIDPattern.MatchString(input.ID) {
 		return domain.ManagedApp{}, domain.NewError(400, "app_id_invalid", "应用 ID 须为 2–63 位小写字母、数字或连字符")
 	}
@@ -119,6 +129,20 @@ func (s *Service) UpdateManagedApp(ctx context.Context, subject, id string, inpu
 	}
 	if err := validateManagedApp(input); err != nil {
 		return domain.ManagedApp{}, err
+	}
+	current, err := s.repository.ManagedApp(ctx, id)
+	if err != nil {
+		return domain.ManagedApp{}, err
+	}
+	if input.GroupID != current.App.GroupID {
+		return domain.ManagedApp{}, domain.NewError(409, "app_group_immutable", "已建应用的分组不能改变")
+	}
+	if current.App.GroupID != "" {
+		if input.Version != "" {
+			if _, err := s.repository.AppVersion(ctx, id, input.Version); err != nil {
+				return domain.ManagedApp{}, domain.NewError(409, "app_version_not_registered", "目录版本必须选择已登记的候选版本")
+			}
+		}
 	}
 	if input.PublicVisible && !slices.Contains([]string{"Preview", "Stable"}, input.Channel) {
 		return domain.ManagedApp{}, domain.NewError(400, "public_app_unpublished", "仅 Preview 或 Stable 应用可公开展示")

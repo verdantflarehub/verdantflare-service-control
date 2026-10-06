@@ -22,6 +22,10 @@ type Config struct {
 	DevLoginSubject       string
 	TrustAuthHeaders      bool
 	AllowedOrigins        []string
+	StationMTLSAddress    string
+	StationMTLSCAFile     string
+	StationMTLSCertFile   string
+	StationMTLSKeyFile    string
 	ReadTimeout           time.Duration
 	WriteTimeout          time.Duration
 	ShutdownTimeout       time.Duration
@@ -65,6 +69,23 @@ func Load() (Config, error) {
 	if gatewayAdminToken != "" && (gatewayBaseURL == "" || len(gatewayAdminToken) < 32) {
 		return Config{}, fmt.Errorf("CONTROL_GATEWAY_ADMIN_TOKEN requires a gateway URL and at least 32 characters")
 	}
+	stationAddress := strings.TrimSpace(os.Getenv("CONTROL_STATION_MTLS_ADDRESS"))
+	stationCAFile := strings.TrimSpace(os.Getenv("CONTROL_STATION_MTLS_CA_FILE"))
+	stationCertFile := strings.TrimSpace(os.Getenv("CONTROL_STATION_MTLS_CERT_FILE"))
+	stationKeyFile := strings.TrimSpace(os.Getenv("CONTROL_STATION_MTLS_KEY_FILE"))
+	stationFields := []string{stationAddress, stationCAFile, stationCertFile, stationKeyFile}
+	configured := 0
+	for _, value := range stationFields {
+		if value != "" {
+			configured++
+		}
+	}
+	if configured != 0 && configured != len(stationFields) {
+		return Config{}, fmt.Errorf("CONTROL_STATION_MTLS_ADDRESS, CA_FILE, CERT_FILE and KEY_FILE must be set together")
+	}
+	if stationAddress != "" && stationAddress == env("CONTROL_ADDRESS", ":8080") {
+		return Config{}, fmt.Errorf("CONTROL_STATION_MTLS_ADDRESS must differ from CONTROL_ADDRESS")
+	}
 
 	return Config{
 		Environment:           environment,
@@ -80,6 +101,10 @@ func Load() (Config, error) {
 		DevLoginSubject:       devSubject,
 		TrustAuthHeaders:      trustHeaders,
 		AllowedOrigins:        splitCSV(os.Getenv("CONTROL_ALLOWED_ORIGINS")),
+		StationMTLSAddress:    stationAddress,
+		StationMTLSCAFile:     stationCAFile,
+		StationMTLSCertFile:   stationCertFile,
+		StationMTLSKeyFile:    stationKeyFile,
 		ReadTimeout:           10 * time.Second,
 		WriteTimeout:          15 * time.Second,
 		ShutdownTimeout:       10 * time.Second,

@@ -53,6 +53,7 @@ type Overview struct {
 type App struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
+	GroupID       string `json:"groupId,omitempty"`
 	Category      string `json:"category"`
 	Summary       string `json:"summary"`
 	Version       string `json:"version"`
@@ -267,6 +268,20 @@ type AppVersion struct {
 	Validation      []ValidationCheck `json:"validation"`
 	Status          string            `json:"status"`
 	CreatedAt       time.Time         `json:"createdAt"`
+}
+
+// StationTestGrant exposes a Center candidate only to one authenticated
+// internal Station. It does not authorize installation or imply validation.
+type StationTestGrant struct {
+	StationID         string    `json:"stationId"`
+	OrganizationID    string    `json:"organizationId"`
+	AppID             string    `json:"appId"`
+	Version           string    `json:"version"`
+	CertificateSHA256 string    `json:"certificateSha256"`
+	ExpiresAt         time.Time `json:"expiresAt"`
+	Revoked           bool      `json:"revoked"`
+	Revision          int       `json:"revision"`
+	CreatedAt         time.Time `json:"createdAt"`
 }
 
 type AppArtifact struct {

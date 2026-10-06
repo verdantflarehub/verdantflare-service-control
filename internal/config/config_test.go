@@ -40,3 +40,21 @@ func TestPartialGatewayConfigurationRejected(t *testing.T) {
 		t.Fatal("expected partial gateway configuration to be rejected")
 	}
 }
+
+func TestStationMTLSRequiresCompleteSeparateListener(t *testing.T) {
+	t.Setenv("CONTROL_ENV", "development")
+	t.Setenv("CONTROL_STATION_MTLS_ADDRESS", "127.0.0.1:8443")
+	if _, err := Load(); err == nil {
+		t.Fatal("partial Station mTLS configuration accepted")
+	}
+	t.Setenv("CONTROL_STATION_MTLS_CA_FILE", "/run/secrets/station-ca.pem")
+	t.Setenv("CONTROL_STATION_MTLS_CERT_FILE", "/run/secrets/control.pem")
+	t.Setenv("CONTROL_STATION_MTLS_KEY_FILE", "/run/secrets/control-key.pem")
+	if _, err := Load(); err != nil {
+		t.Fatalf("complete Station mTLS configuration rejected: %v", err)
+	}
+	t.Setenv("CONTROL_STATION_MTLS_ADDRESS", ":8080")
+	if _, err := Load(); err == nil {
+		t.Fatal("Station mTLS listener shared the browser address")
+	}
+}

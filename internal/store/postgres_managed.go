@@ -45,6 +45,36 @@ func (p *Postgres) AppVersion(ctx context.Context, appID, version string) (domai
 	return m.AppVersion(ctx, appID, version)
 }
 
+func (p *Postgres) CreateStationTestGrant(ctx context.Context, grant domain.StationTestGrant) (result domain.StationTestGrant, err error) {
+	err = p.mutate(ctx, func(m *Memory) error { var e error; result, e = m.CreateStationTestGrant(ctx, grant); return e })
+	return
+}
+
+func (p *Postgres) ListStationTestGrants(ctx context.Context, appID string) ([]domain.StationTestGrant, error) {
+	m, err := p.read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return m.ListStationTestGrants(ctx, appID)
+}
+
+func (p *Postgres) StationTestGrantsForStation(ctx context.Context, stationID string) ([]domain.StationTestGrant, error) {
+	m, err := p.read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return m.StationTestGrantsForStation(ctx, stationID)
+}
+
+func (p *Postgres) RevokeStationTestGrant(ctx context.Context, appID, version, stationID string) (result domain.StationTestGrant, err error) {
+	err = p.mutate(ctx, func(m *Memory) error {
+		var e error
+		result, e = m.RevokeStationTestGrant(ctx, appID, version, stationID)
+		return e
+	})
+	return
+}
+
 func (p *Postgres) CreateManagedOrganization(ctx context.Context, organization domain.Organization) (result domain.ManagedOrganization, err error) {
 	err = p.mutate(ctx, func(m *Memory) error {
 		var e error

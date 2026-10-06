@@ -170,6 +170,13 @@ func (s *Service) CreateAppVersion(ctx context.Context, subject, appID string, i
 	if err != nil {
 		return domain.AppVersion{}, err
 	}
+	app, err := s.repository.ManagedApp(ctx, appID)
+	if err != nil {
+		return domain.AppVersion{}, err
+	}
+	if app.App.GroupID != "" && app.App.GroupID != manifest.GroupID {
+		return domain.AppVersion{}, domain.NewError(409, "app_group_mismatch", "Manifest 分组与应用身份分组不一致")
+	}
 	canonical, err := json.Marshal(manifest)
 	if err != nil {
 		return domain.AppVersion{}, domain.NewError(400, "manifest_invalid", "清单无法规范化")

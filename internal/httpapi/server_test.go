@@ -217,6 +217,41 @@ func TestManagedAppPublicationAndEntitlement(t *testing.T) {
 	frozen.Body.Close()
 }
 
+func TestManagedAppCanBeVersionlessInternalDraftButNotPreview(t *testing.T) {
+	server := newTestServer(t, testConfig())
+	appID := "comfyui-draft"
+	created := request(t, server, http.MethodPost, "/api/control/ops/apps", map[string]any{
+		"id": appID, "name": "ComfyUI", "category": "图像创作", "summary": "工作流创作应用",
+	})
+	if created.StatusCode != http.StatusCreated {
+		t.Fatalf("create draft status = %d, body = %s", created.StatusCode, readBody(t, created))
+	}
+	var draft domain.ManagedApp
+	decode(t, created, &draft)
+	created.Body.Close()
+	if draft.App.Version != "" || draft.App.Channel != "Candidate" || draft.App.PublicVisible {
+		t.Fatalf("draft unexpectedly published: %+v", draft.App)
+	}
+
+	public := request(t, server, http.MethodGet, "/api/control/public/catalog", nil)
+	var catalog domain.PublicCatalog
+	decode(t, public, &catalog)
+	public.Body.Close()
+	for _, app := range catalog.Apps {
+		if app.ID == appID {
+			t.Fatal("versionless draft appeared in public catalog")
+		}
+	}
+
+	preview := request(t, server, http.MethodPatch, "/api/control/ops/apps/"+appID, map[string]any{
+		"name": "ComfyUI", "category": "图像创作", "summary": "工作流创作应用", "channel": "Preview", "publicVisible": true,
+	})
+	defer preview.Body.Close()
+	if preview.StatusCode != http.StatusBadRequest {
+		t.Fatalf("versionless preview status = %d, body = %s", preview.StatusCode, readBody(t, preview))
+	}
+}
+
 func TestManagedWriteRequiresCurrentOperationsRole(t *testing.T) {
 	server := newTestServer(t, testConfig())
 	switched := request(t, server, http.MethodPut, "/api/control/context/active-organization", map[string]string{"organizationId": "org_northshore"})

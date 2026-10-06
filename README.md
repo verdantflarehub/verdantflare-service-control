@@ -15,6 +15,7 @@ VerdantFlare Hub 的 Go 业务后端。首期采用模块化单体，统一暴�
 - 应用 Candidate → Preview 发布、客户组织创建/冻结与应用权益分配；运营操作按当前角色校验并持久化。
 - 成员邀请在本版保存为待接受业务记录，不创建 Login 账号或发送邮件。
 - Hub 管理的公开模型资料及应用版本落库；模型显式上架后同时可供 WWW 和 Hub 读取，但仍以网关当前返回的模型 ID 为准。
+- 运营可为内部测试 Station 绑定候选应用版本、设备证书指纹和到期时间；独立 mTLS 端口只提供不可安装的候选索引与 Manifest，不提供制品下载或安装。
 - 统一 JSON 错误、Request ID、安全响应头、请求体限制和优雅退出。
 
 ## 本地运行
@@ -53,6 +54,8 @@ CONTROL_TRUST_AUTH_HEADERS=true
 
 认证代理验证 Login 会话后设置 `X-VF-Login-Subject`。代理必须删除客户端自行提交的同名 Header，Control Service 不接收密码或前端持久化 Token。后续接入服务端 JWT 验证时可替换该适配层，不改变业务模块。
 
+内部 Station 接口不复用上述浏览器入口。只有同时配置 `CONTROL_STATION_MTLS_ADDRESS`、`CONTROL_STATION_MTLS_CA_FILE`、`CONTROL_STATION_MTLS_CERT_FILE`、`CONTROL_STATION_MTLS_KEY_FILE` 才启用独立 TLS 监听；客户端证书须由受信 CA 签发，含唯一 URI SAN `spiffe://verdantflarehub.com/station/{uuidv7}`。私钥和 CA 文件由受控 Secret 挂载，不放入仓库；部署前须明确内部网络访问控制和证书签发/轮换流程。
+
 ## 主要接口
 
 | 方法 | 路径 | 说明 |
@@ -84,9 +87,16 @@ CONTROL_TRUST_AUTH_HEADERS=true
 | GET | `/api/control/ops/organizations` | 客户组织运营 |
 | POST | `/api/control/ops/apps` | 创建 Candidate 应用，需 `app_ops_admin` |
 | GET/PATCH | `/api/control/ops/apps/{id}` | 查看、编辑应用与发布通道，需 `app_ops_admin` |
+| GET/POST | `/api/control/ops/apps/{id}/versions` | 查看、登记不可覆盖的候选版本，需 `app_ops_admin` |
+| GET | `/api/control/ops/apps/{id}/versions/{version}` | 读取候选版本，需 `app_ops_admin` |
+| GET | `/api/control/ops/apps/{id}/station-grants` | 查看内部测试设备授权，需 `app_ops_admin` |
+| POST | `/api/control/ops/apps/{id}/versions/{version}/station-grants` | 授权内部设备读取候选清单，需 `app_ops_admin` |
+| DELETE | `/api/control/ops/apps/{id}/versions/{version}/station-grants/{stationId}` | 撤销内部设备授权，需 `app_ops_admin` |
 | POST | `/api/control/ops/organizations` | 创建无权益客户组织，需 `customer_success_admin` |
 | GET/PATCH | `/api/control/ops/organizations/{id}` | 查看、更新套餐/冻结状态/应用权益，需 `customer_success_admin` |
 | POST/PATCH | `/api/control/ops/organizations/{id}/members[/{memberId}]` | 创建或更新客户组织成员记录，需 `customer_success_admin` |
+
+独立 Station mTLS 端口另提供 `GET /api/control/station/v1/catalog` 和 `GET /api/control/station/v1/apps/{id}/versions/{version}/manifest`。未启用独立端口时均不可用；普通 Hub/WWW 端口没有这些路由。返回项始终为 `center_recorded`、`installable=false`，Station 不得据此安装。详细边界以工作区的 Center→Station 分发契约草案为准。
 
 ## 数据存储
 

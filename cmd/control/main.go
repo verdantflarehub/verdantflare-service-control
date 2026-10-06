@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"log/slog"
 	"net/http"
 	"os"
@@ -105,12 +107,41 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
+	var stationServer *http.Server
+	if configuration.StationMTLSAddress != "" {
+		caPEM, err := os.ReadFile(configuration.StationMTLSCAFile)
+		if err != nil {
+			logger.Error("station CA unreadable", "error", err)
+			os.Exit(1)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			logger.Error("station CA invalid")
+			os.Exit(1)
+		}
+		if _, err := tls.LoadX509KeyPair(configuration.StationMTLSCertFile, configuration.StationMTLSKeyFile); err != nil {
+			logger.Error("station TLS identity invalid", "error", err)
+			os.Exit(1)
+		}
+		stationServer = &http.Server{
+			Addr: configuration.StationMTLSAddress, Handler: handler.StationHandler(),
+			TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS13, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool},
+			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: configuration.ReadTimeout,
+			WriteTimeout: configuration.WriteTimeout, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
+		}
+	}
 
-	serverErrors := make(chan error, 1)
+	serverErrors := make(chan error, 2)
 	go func() {
 		logger.Info("control service started", "address", configuration.Address, "environment", configuration.Environment, "store", storeName)
 		serverErrors <- server.ListenAndServe()
 	}()
+	if stationServer != nil {
+		go func() {
+			logger.Info("station mTLS interface started", "address", configuration.StationMTLSAddress)
+			serverErrors <- stationServer.ListenAndServeTLS(configuration.StationMTLSCertFile, configuration.StationMTLSKeyFile)
+		}()
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
@@ -130,6 +161,13 @@ func main() {
 		logger.Error("graceful shutdown failed", "error", err)
 		_ = server.Close()
 		os.Exit(1)
+	}
+	if stationServer != nil {
+		if err := stationServer.Shutdown(shutdownContext); err != nil {
+			logger.Error("station interface shutdown failed", "error", err)
+			_ = stationServer.Close()
+			os.Exit(1)
+		}
 	}
 	logger.Info("control service stopped")
 }
