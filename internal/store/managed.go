@@ -13,6 +13,8 @@ func appStatus(channel string) string {
 	switch channel {
 	case "Preview":
 		return "预览发布"
+	case "Listed":
+		return "目录已上架·待交付"
 	case "Stable":
 		return "可用"
 	case "Paused":
@@ -35,7 +37,7 @@ func (m *Memory) releaseForLocked(app domain.App) domain.Release {
 		}
 	}
 	release.AppID, release.App, release.Version, release.Channel = app.ID, app.Name, app.Version, app.Channel
-	release.Status = map[string]string{"Candidate": "候选", "Preview": "灰度中", "Stable": "已发布", "Paused": "已暂停"}[app.Channel]
+	release.Status = map[string]string{"Candidate": "候选", "Listed": "目录已上架", "Preview": "灰度中", "Stable": "已发布", "Paused": "已暂停"}[app.Channel]
 	audience := 0
 	for _, entitlements := range m.entitlements {
 		if entitlements[app.ID] {

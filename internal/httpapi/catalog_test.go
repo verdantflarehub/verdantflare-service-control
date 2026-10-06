@@ -94,6 +94,60 @@ func TestPublicCatalogUsesOnlyExplicitlyPublishedDatabaseRecords(t *testing.T) {
 	}
 }
 
+func TestListedAppAppearsInHubWithoutVersionOrInstallEntitlement(t *testing.T) {
+	repository := store.NewMemoryBootstrap()
+	service := control.NewService(repository)
+	server := httptest.NewServer(httpapi.New(config.Config{Environment: "test", DevLoginSubject: "00000000-0000-4000-8000-000000000001"}, service, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	defer server.Close()
+
+	created := request(t, server, http.MethodPost, "/api/control/ops/apps", map[string]any{
+		"id": "blender-mcp", "name": "Blender MCP", "category": "三维创作", "summary": "Blender 场景与动画工具",
+	})
+	if created.StatusCode != http.StatusCreated {
+		t.Fatalf("create: %d %s", created.StatusCode, readBody(t, created))
+	}
+	created.Body.Close()
+	listed := request(t, server, http.MethodPatch, "/api/control/ops/apps/blender-mcp", map[string]any{
+		"name": "Blender MCP", "category": "三维创作", "summary": "Blender 场景与动画工具", "channel": "Listed",
+	})
+	if listed.StatusCode != http.StatusOK {
+		t.Fatalf("list in Hub: %d %s", listed.StatusCode, readBody(t, listed))
+	}
+	listed.Body.Close()
+
+	market := request(t, server, http.MethodGet, "/api/control/market/apps", nil)
+	var apps []domain.App
+	decode(t, market, &apps)
+	market.Body.Close()
+	if len(apps) != 1 || apps[0].ID != "blender-mcp" || apps[0].Version != "" || apps[0].Entitled || apps[0].Channel != "Listed" {
+		t.Fatalf("unexpected Hub listing: %+v", apps)
+	}
+
+	public := request(t, server, http.MethodGet, "/api/control/public/catalog", nil)
+	var catalog domain.PublicCatalog
+	decode(t, public, &catalog)
+	public.Body.Close()
+	if len(catalog.Apps) != 0 {
+		t.Fatalf("Hub-only listing leaked into WWW catalog: %+v", catalog.Apps)
+	}
+
+	invalid := request(t, server, http.MethodPatch, "/api/control/ops/apps/blender-mcp", map[string]any{
+		"name": "Blender MCP", "category": "三维创作", "summary": "Blender 场景与动画工具", "channel": "Listed", "version": "0.1.0",
+	})
+	if invalid.StatusCode != http.StatusBadRequest {
+		t.Fatalf("versioned listing status = %d, want 400", invalid.StatusCode)
+	}
+	invalid.Body.Close()
+
+	invalid = request(t, server, http.MethodPatch, "/api/control/ops/apps/blender-mcp", map[string]any{
+		"name": "Blender MCP", "category": "三维创作", "summary": "Blender 场景与动画工具", "channel": "Listed", "publicVisible": true,
+	})
+	if invalid.StatusCode != http.StatusBadRequest {
+		t.Fatalf("WWW listing status = %d, want 400", invalid.StatusCode)
+	}
+	invalid.Body.Close()
+}
+
 func TestPublishedModelsFollowGatewayForWWWAndHub(t *testing.T) {
 	gateway := &catalogGateway{models: map[string]struct{}{
 		"verdantflare-sd2": {}, "deepseek-flash": {}, "deepseek-v4-pro": {},

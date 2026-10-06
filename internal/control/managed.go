@@ -68,7 +68,7 @@ func validateManagedApp(input ManagedAppInput) error {
 	if utf8.RuneCountInString(strings.TrimSpace(input.Name)) < 2 {
 		return domain.NewError(400, "app_invalid", "应用名称至少 2 个字符")
 	}
-	if !slices.Contains([]string{"Candidate", "Preview", "Stable", "Paused"}, input.Channel) {
+	if !slices.Contains([]string{"Candidate", "Listed", "Preview", "Stable", "Paused"}, input.Channel) {
 		return domain.NewError(400, "channel_invalid", "不支持的发布通道")
 	}
 	if input.GroupID != "" && !slices.Contains([]string{"image", "music", "video"}, input.GroupID) {
@@ -76,6 +76,9 @@ func validateManagedApp(input ManagedAppInput) error {
 	}
 	if slices.Contains([]string{"Preview", "Stable"}, input.Channel) && strings.TrimSpace(input.Version) == "" {
 		return domain.NewError(400, "app_version_required", "公开或预览应用的目录版本不能为空；资料草稿可以留空")
+	}
+	if input.Channel == "Listed" && strings.TrimSpace(input.Version) != "" {
+		return domain.NewError(400, "listed_app_version_forbidden", "仅资料上架的应用不得声明交付包版本")
 	}
 	if input.PublicIconURL != "" {
 		parsed, err := url.Parse(input.PublicIconURL)
@@ -145,7 +148,7 @@ func (s *Service) UpdateManagedApp(ctx context.Context, subject, id string, inpu
 		}
 	}
 	if input.PublicVisible && !slices.Contains([]string{"Preview", "Stable"}, input.Channel) {
-		return domain.ManagedApp{}, domain.NewError(400, "public_app_unpublished", "仅 Preview 或 Stable 应用可公开展示")
+		return domain.ManagedApp{}, domain.NewError(400, "public_app_unpublished", "仅 Preview 或 Stable 应用可进入 WWW 公共目录")
 	}
 	return s.repository.UpdateManagedApp(ctx, id, appFromInput(input))
 }

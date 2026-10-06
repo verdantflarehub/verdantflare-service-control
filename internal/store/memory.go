@@ -267,11 +267,11 @@ func (m *Memory) ListApps(_ context.Context, organizationID string) ([]domain.Ap
 	active := m.organizations[organizationID].Status != "冻结"
 	result := make([]domain.App, 0, len(m.apps))
 	for id, app := range m.apps {
-		if !published(app) {
+		if !published(app) && app.Channel != "Listed" {
 			continue
 		}
-		app.Entitled = active && entitlements[id]
-		if app.PublicVisible || app.Entitled {
+		app.Entitled = published(app) && active && entitlements[id]
+		if app.Channel == "Listed" || app.PublicVisible || app.Entitled {
 			result = append(result, app)
 		}
 	}
@@ -283,11 +283,11 @@ func (m *Memory) GetApp(_ context.Context, organizationID, appID string) (domain
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	app, ok := m.apps[appID]
-	if !ok || !published(app) {
+	if !ok || (!published(app) && app.Channel != "Listed") {
 		return domain.App{}, domain.NewError(404, "app_not_found", "应用不存在")
 	}
-	app.Entitled = m.organizations[organizationID].Status != "冻结" && m.entitlements[organizationID][appID]
-	if !app.PublicVisible && !app.Entitled {
+	app.Entitled = published(app) && m.organizations[organizationID].Status != "冻结" && m.entitlements[organizationID][appID]
+	if app.Channel != "Listed" && !app.PublicVisible && !app.Entitled {
 		return domain.App{}, domain.NewError(404, "app_not_found", "应用不存在或当前组织无权查看")
 	}
 	return app, nil
