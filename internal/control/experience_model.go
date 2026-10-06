@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -15,6 +17,7 @@ import (
 type CreateModelExperienceInput struct {
 	RequestID string `json:"requestId"`
 	ModelID   string `json:"modelId"`
+	KeyID     string `json:"keyId"`
 	Prompt    string `json:"prompt"`
 }
 
@@ -40,15 +43,19 @@ func (s *Service) CreateModelExperienceRun(ctx context.Context, subject string, 
 		return domain.ModelExperienceRun{}, err
 	}
 	input.Prompt = strings.TrimSpace(input.Prompt)
+	keyID, keyErr := strconv.Atoi(strings.TrimPrefix(input.KeyID, "gw_"))
 	if !gatewayRequestIDPattern.MatchString(input.RequestID) || !appIDPattern.MatchString(input.ModelID) || input.Prompt == "" || utf8.RuneCountInString(input.Prompt) > 2000 {
 		return domain.ModelExperienceRun{}, domain.NewError(400, "experience_request_invalid", "模型、请求 ID 或提示词无效")
+	}
+	if !strings.HasPrefix(input.KeyID, "gw_") || keyErr != nil || keyID < 1 {
+		return domain.ModelExperienceRun{}, domain.NewError(400, "experience_key_required", "请先创建并选择当前组织的 API Key")
 	}
 	existing, found, err := s.repository.FindModelExperienceRunByRequestID(ctx, organization.OrganizationID, input.RequestID)
 	if err != nil {
 		return domain.ModelExperienceRun{}, err
 	}
 	if found {
-		if existing.CenterUserID == userID && existing.ModelID == input.ModelID && existing.Prompt == input.Prompt {
+		if existing.CenterUserID == userID && existing.ModelID == input.ModelID && existing.KeyID == input.KeyID && existing.Prompt == input.Prompt {
 			return existing, nil
 		}
 		return domain.ModelExperienceRun{}, domain.NewError(409, "experience_request_conflict", "请求 ID 已用于其他体验任务")
@@ -73,6 +80,16 @@ func (s *Service) CreateModelExperienceRun(ctx context.Context, subject string, 
 	if !available {
 		return domain.ModelExperienceRun{}, domain.NewError(403, "experience_model_disabled", "该模型尚未开放 Hub 在线体验")
 	}
+	probe, err := s.accountGateway.ProbeKey(ctx, organization.OrganizationID, keyID)
+	if err != nil {
+		return domain.ModelExperienceRun{}, gatewayAccountError(err)
+	}
+	if !probe.OK || !slices.Contains(probe.Models, input.ModelID) {
+		if probe.Reason == "insufficient_quota" {
+			return domain.ModelExperienceRun{}, domain.NewError(402, "experience_credit_insufficient", "组织 API 额度不足")
+		}
+		return domain.ModelExperienceRun{}, domain.NewError(403, "experience_key_unavailable", "所选 API Key 已失效或未授权此模型")
+	}
 	balance, err := s.accountGateway.Balance(ctx, organization.OrganizationID)
 	if err != nil {
 		return domain.ModelExperienceRun{}, gatewayAccountError(err)
@@ -88,7 +105,7 @@ func (s *Service) CreateModelExperienceRun(ctx context.Context, subject string, 
 	now := s.now()
 	run := domain.ModelExperienceRun{
 		ID: newID("mrun"), RequestID: input.RequestID, OrganizationID: organization.OrganizationID,
-		CenterUserID: userID, ModelID: input.ModelID, Prompt: input.Prompt,
+		CenterUserID: userID, ModelID: input.ModelID, KeyID: input.KeyID, Prompt: input.Prompt,
 		Status: "submitting", CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour),
 	}
 	stored, created, err := s.repository.CreateModelExperienceRun(ctx, run)
@@ -104,7 +121,8 @@ func (s *Service) executeModelExperienceRun(run domain.ModelExperienceRun) {
 	defer func() { <-s.modelRunSlots }()
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
-	result, err := s.accountGateway.ExperienceChat(ctx, run.OrganizationID, run.ModelID, run.Prompt)
+	keyID, _ := strconv.Atoi(strings.TrimPrefix(run.KeyID, "gw_"))
+	result, err := s.accountGateway.ExperienceChat(ctx, run.OrganizationID, keyID, run.ModelID, run.Prompt)
 	status, response, errorCode := "completed", result.Response, ""
 	if err != nil {
 		status, response, errorCode = "failed", "", "upstream_rejected"
@@ -113,7 +131,9 @@ func (s *Service) executeModelExperienceRun(run domain.ModelExperienceRun) {
 			if gatewayError.Status == 402 {
 				errorCode = "insufficient_quota"
 			} else if gatewayError.Status == 403 {
-				errorCode = "organization_disabled"
+				errorCode = "key_unavailable"
+			} else if gatewayError.Status == 404 {
+				errorCode = "key_not_found"
 			} else if gatewayError.Status == 408 || gatewayError.Status >= 500 {
 				status, errorCode = "outcome_unknown", "upstream_result_unknown"
 			}

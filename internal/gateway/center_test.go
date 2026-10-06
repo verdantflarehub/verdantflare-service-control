@@ -37,9 +37,10 @@ func TestCenterClientUsesAuthenticatedOrganizationPaths(t *testing.T) {
 		case "POST /api/internal/center/organizations/org_alpha/experience/chat-completions":
 			var payload struct {
 				ModelID string `json:"modelId"`
+				KeyID   int    `json:"keyId"`
 				Prompt  string `json:"prompt"`
 			}
-			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil || payload.ModelID != "deepseek-v4-pro" || payload.Prompt != "你好" {
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil || payload.KeyID != 7 || payload.ModelID != "deepseek-v4-pro" || payload.Prompt != "你好" {
 				t.Errorf("unexpected experience request: %+v %v", payload, err)
 			}
 			writer.Header().Set("X-Oneapi-Request-Id", "202610051016420000000000000001")
@@ -83,7 +84,7 @@ func TestCenterClientUsesAuthenticatedOrganizationPaths(t *testing.T) {
 	if err := client.SetEnabled(ctx, "org_alpha", false); err != nil {
 		t.Fatal(err)
 	}
-	if result, err := client.ExperienceChat(ctx, "org_alpha", "deepseek-v4-pro", "你好"); err != nil || result.Response != "已生成的回答" || result.TotalTokens != 20 || result.BilledQuota == nil || *result.BilledQuota != 362 {
+	if result, err := client.ExperienceChat(ctx, "org_alpha", 7, "deepseek-v4-pro", "你好"); err != nil || result.Response != "已生成的回答" || result.TotalTokens != 20 || result.BilledQuota == nil || *result.BilledQuota != 362 {
 		t.Fatalf("experience chat: %+v %v", result, err)
 	}
 	if len(seen) != 10 {
@@ -105,7 +106,7 @@ func TestCenterClientDoesNotInventChargeWhenLogIsMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := client.ExperienceChat(context.Background(), "org_alpha", "deepseek-flash", "你好")
+	result, err := client.ExperienceChat(context.Background(), "org_alpha", 7, "deepseek-flash", "你好")
 	if err != nil || result.Response != "真实回答" || result.BilledQuota != nil {
 		t.Fatalf("missing charge must not be estimated: %+v %v", result, err)
 	}

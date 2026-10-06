@@ -174,8 +174,8 @@ func (c *CenterClient) ProbeKey(ctx context.Context, organizationID string, toke
 	return result, err
 }
 
-func (c *CenterClient) ExperienceChat(ctx context.Context, organizationID, modelID, prompt string) (CenterChatResult, error) {
-	encoded, err := json.Marshal(map[string]string{"modelId": modelID, "prompt": prompt})
+func (c *CenterClient) ExperienceChat(ctx context.Context, organizationID string, keyID int, modelID, prompt string) (CenterChatResult, error) {
+	encoded, err := json.Marshal(map[string]any{"keyId": keyID, "modelId": modelID, "prompt": prompt})
 	if err != nil {
 		return CenterChatResult{}, err
 	}

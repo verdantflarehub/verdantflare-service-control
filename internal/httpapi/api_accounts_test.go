@@ -27,6 +27,7 @@ type accountGatewayFixture struct {
 	probes    int
 	chatCalls atomic.Int32
 	chatModel atomic.Value
+	chatKey   atomic.Int32
 	chatErr   error
 }
 
@@ -76,15 +77,22 @@ func (f *accountGatewayFixture) ProbeKey(_ context.Context, org string, id int) 
 	f.probes++
 	for _, key := range f.keys[org] {
 		if key.ID == id {
-			return gateway.CenterProbe{OK: key.Status == "active" && f.balances[org].RemainingQuota > 0, Reason: key.Status, Models: key.Models, RemainingQuota: f.balances[org].RemainingQuota, ReadOnly: true}, nil
+			reason := "ok"
+			if key.Status != "active" {
+				reason = key.Status
+			} else if f.balances[org].RemainingQuota <= 0 {
+				reason = "insufficient_quota"
+			}
+			return gateway.CenterProbe{OK: reason == "ok", Reason: reason, Models: key.Models, RemainingQuota: f.balances[org].RemainingQuota, ReadOnly: true}, nil
 		}
 	}
 	return gateway.CenterProbe{}, gateway.CenterHTTPError{Status: 404}
 }
 
-func (f *accountGatewayFixture) ExperienceChat(_ context.Context, _ string, modelID, _ string) (gateway.CenterChatResult, error) {
+func (f *accountGatewayFixture) ExperienceChat(_ context.Context, _ string, keyID int, modelID, _ string) (gateway.CenterChatResult, error) {
 	f.chatCalls.Add(1)
 	f.chatModel.Store(modelID)
+	f.chatKey.Store(int32(keyID))
 	if f.chatErr != nil {
 		return gateway.CenterChatResult{}, f.chatErr
 	}

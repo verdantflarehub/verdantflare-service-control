@@ -136,6 +136,7 @@ type ModelExperienceRun struct {
 	OrganizationID string     `json:"organizationId"`
 	CenterUserID   string     `json:"centerUserId"`
 	ModelID        string     `json:"modelId"`
+	KeyID          string     `json:"keyId,omitempty"`
 	Prompt         string     `json:"prompt"`
 	Response       string     `json:"response,omitempty"`
 	Status         string     `json:"status"`

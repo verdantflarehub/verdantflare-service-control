@@ -14,7 +14,7 @@ func TestModelExperienceRunIdempotencyIsolationAndCleanup(t *testing.T) {
 	now := time.Now().UTC()
 	run := domain.ModelExperienceRun{
 		ID: "mrun_one", RequestID: "request_id_123456789", OrganizationID: "org_verdantflare",
-		CenterUserID: "cu_owner", ModelID: "deepseek-flash", Prompt: "你好", Status: "submitting",
+		CenterUserID: "cu_owner", ModelID: "deepseek-flash", KeyID: "gw_7", Prompt: "你好", Status: "submitting",
 		CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour),
 	}
 	created, fresh, err := repository.CreateModelExperienceRun(ctx, run)
@@ -30,7 +30,7 @@ func TestModelExperienceRunIdempotencyIsolationAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	persisted, err := reopened.GetModelExperienceRun(ctx, run.OrganizationID, run.CenterUserID, run.ID)
-	if err != nil || persisted.Prompt != run.Prompt {
+	if err != nil || persisted.Prompt != run.Prompt || persisted.KeyID != run.KeyID {
 		t.Fatalf("run did not survive repository serialization: %+v %v", persisted, err)
 	}
 	duplicate, fresh, err := repository.CreateModelExperienceRun(ctx, run)
@@ -41,6 +41,11 @@ func TestModelExperienceRunIdempotencyIsolationAndCleanup(t *testing.T) {
 	changed.Prompt = "其他请求"
 	if _, _, err := repository.CreateModelExperienceRun(ctx, changed); err == nil {
 		t.Fatal("same request ID accepted a changed prompt")
+	}
+	changed = run
+	changed.KeyID = "gw_8"
+	if _, _, err := repository.CreateModelExperienceRun(ctx, changed); err == nil {
+		t.Fatal("same request ID accepted a changed key")
 	}
 	if _, err := repository.GetModelExperienceRun(ctx, run.OrganizationID, "cu_other", run.ID); err == nil {
 		t.Fatal("another user read the prompt")

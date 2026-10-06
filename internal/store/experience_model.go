@@ -53,7 +53,7 @@ func (m *Memory) CreateModelExperienceRun(_ context.Context, run domain.ModelExp
 	active := 0
 	for _, existing := range m.modelRuns {
 		if existing.OrganizationID == run.OrganizationID && existing.RequestID == run.RequestID {
-			if existing.CenterUserID == run.CenterUserID && existing.ModelID == run.ModelID && existing.Prompt == run.Prompt && now.Before(existing.ExpiresAt) {
+			if existing.CenterUserID == run.CenterUserID && existing.ModelID == run.ModelID && existing.KeyID == run.KeyID && existing.Prompt == run.Prompt && now.Before(existing.ExpiresAt) {
 				return existing, false, nil
 			}
 			return domain.ModelExperienceRun{}, false, domain.NewError(409, "experience_request_conflict", "请求 ID 已用于其他体验任务")

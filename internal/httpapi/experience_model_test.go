@@ -38,13 +38,39 @@ func TestModelExperienceHTTPFlow(t *testing.T) {
 	published.Body.Close()
 
 	path := "/api/control/experience/model-runs"
-	input := map[string]string{"requestId": "model_experience_request_001", "modelId": "deepseek-flash", "prompt": "你好"}
+	accounts.keys["org_verdantflare"] = []gateway.CenterKey{{ID: 7, Name: "my-key", Status: "active", Models: []string{"deepseek-flash", "deepseek-v4-pro"}}}
+	input := map[string]string{"requestId": "model_experience_request_001", "modelId": "deepseek-flash", "keyId": "gw_7", "prompt": "你好"}
+	withoutKey := request(t, server, http.MethodPost, path, map[string]string{"requestId": "model_experience_request_004", "modelId": "deepseek-flash", "prompt": "你好"})
+	if withoutKey.StatusCode != http.StatusBadRequest || accounts.chatCalls.Load() != 0 {
+		t.Fatalf("missing key reached paid gateway: %d %s", withoutKey.StatusCode, readBody(t, withoutKey))
+	}
+	withoutKey.Body.Close()
 	noCredit := request(t, server, http.MethodPost, path, input)
 	if noCredit.StatusCode != http.StatusPaymentRequired {
 		t.Fatalf("no credit: %d %s", noCredit.StatusCode, readBody(t, noCredit))
 	}
 	noCredit.Body.Close()
 	accounts.balances["org_verdantflare"] = gateway.CenterBalance{Enabled: true, RemainingQuota: 500000}
+	accounts.keys["org_verdantflare"][0].Status = "revoked"
+	revoked := request(t, server, http.MethodPost, path, input)
+	if revoked.StatusCode != http.StatusForbidden || accounts.chatCalls.Load() != 0 {
+		t.Fatalf("revoked key reached paid gateway: %d %s", revoked.StatusCode, readBody(t, revoked))
+	}
+	revoked.Body.Close()
+	accounts.keys["org_verdantflare"][0].Status = "active"
+	accounts.keys["org_verdantflare"][0].Models = []string{"deepseek-v4-pro"}
+	wrongModel := request(t, server, http.MethodPost, path, input)
+	if wrongModel.StatusCode != http.StatusForbidden || accounts.chatCalls.Load() != 0 {
+		t.Fatalf("out-of-scope model reached paid gateway: %d %s", wrongModel.StatusCode, readBody(t, wrongModel))
+	}
+	wrongModel.Body.Close()
+	accounts.keys["org_verdantflare"][0].Models = []string{"deepseek-flash", "deepseek-v4-pro"}
+	otherOrganizationKey := map[string]string{"requestId": input["requestId"], "modelId": input["modelId"], "keyId": "gw_8", "prompt": input["prompt"]}
+	missingFromOrganization := request(t, server, http.MethodPost, path, otherOrganizationKey)
+	if missingFromOrganization.StatusCode != http.StatusNotFound || accounts.chatCalls.Load() != 0 {
+		t.Fatalf("foreign key reached paid gateway: %d %s", missingFromOrganization.StatusCode, readBody(t, missingFromOrganization))
+	}
+	missingFromOrganization.Body.Close()
 
 	accepted := request(t, server, http.MethodPost, path, input)
 	if accepted.StatusCode != http.StatusAccepted {
@@ -53,7 +79,7 @@ func TestModelExperienceHTTPFlow(t *testing.T) {
 	var run domain.ModelExperienceRun
 	decode(t, accepted, &run)
 	accepted.Body.Close()
-	if run.ID == "" || run.OrganizationID != "org_verdantflare" || run.Status != "submitting" {
+	if run.ID == "" || run.OrganizationID != "org_verdantflare" || run.KeyID != "gw_7" || run.Status != "submitting" {
 		t.Fatalf("bad initial run: %+v", run)
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -72,7 +98,7 @@ func TestModelExperienceHTTPFlow(t *testing.T) {
 	if run.Status != "completed" || run.Response != "真实上游响应" || run.TotalTokens != 20 || run.BilledQuota == nil || *run.BilledQuota != 362 {
 		t.Fatalf("run did not persist a real gateway result: %+v", run)
 	}
-	if accounts.chatModel.Load() != "deepseek-flash" {
+	if accounts.chatModel.Load() != "deepseek-flash" || accounts.chatKey.Load() != 7 {
 		t.Fatalf("gateway received wrong model: %v", accounts.chatModel.Load())
 	}
 	accounts.balances["org_verdantflare"] = gateway.CenterBalance{Enabled: false, RemainingQuota: 0}
@@ -86,6 +112,11 @@ func TestModelExperienceHTTPFlow(t *testing.T) {
 	if same.ID != run.ID || accounts.chatCalls.Load() != 1 {
 		t.Fatalf("retry duplicated a paid call: original=%s retry=%s calls=%d", run.ID, same.ID, accounts.chatCalls.Load())
 	}
+	changedKey := request(t, server, http.MethodPost, path, otherOrganizationKey)
+	if changedKey.StatusCode != http.StatusConflict || accounts.chatCalls.Load() != 1 {
+		t.Fatalf("retry with changed key duplicated a paid call: %d %s", changedKey.StatusCode, readBody(t, changedKey))
+	}
+	changedKey.Body.Close()
 	listed := request(t, server, http.MethodGet, path, nil)
 	var runs []domain.ModelExperienceRun
 	decode(t, listed, &runs)
@@ -113,7 +144,7 @@ func TestModelExperienceHTTPFlow(t *testing.T) {
 	}
 	publishedPro.Body.Close()
 	accounts.balances["org_verdantflare"] = gateway.CenterBalance{Enabled: true, RemainingQuota: 500000}
-	proInput := map[string]string{"requestId": "model_experience_request_003", "modelId": pro.ID, "prompt": "介绍一下自己"}
+	proInput := map[string]string{"requestId": "model_experience_request_003", "modelId": pro.ID, "keyId": "gw_7", "prompt": "介绍一下自己"}
 	disabled := request(t, server, http.MethodPost, path, proInput)
 	if disabled.StatusCode != http.StatusForbidden || accounts.chatCalls.Load() != 1 {
 		t.Fatalf("closed experience reached gateway: %d calls=%d %s", disabled.StatusCode, accounts.chatCalls.Load(), readBody(t, disabled))
@@ -146,7 +177,7 @@ func TestModelExperienceHTTPFlow(t *testing.T) {
 	}
 	accounts.balances["org_verdantflare"] = gateway.CenterBalance{Enabled: true, RemainingQuota: 500000}
 	accounts.chatErr = gateway.CenterHTTPError{Status: http.StatusServiceUnavailable}
-	uncertainInput := map[string]string{"requestId": "model_experience_request_002", "modelId": "deepseek-flash", "prompt": "第二次提问"}
+	uncertainInput := map[string]string{"requestId": "model_experience_request_002", "modelId": "deepseek-flash", "keyId": "gw_7", "prompt": "第二次提问"}
 	uncertain := request(t, server, http.MethodPost, path, uncertainInput)
 	if uncertain.StatusCode != http.StatusAccepted {
 		t.Fatalf("uncertain submit: %d %s", uncertain.StatusCode, readBody(t, uncertain))

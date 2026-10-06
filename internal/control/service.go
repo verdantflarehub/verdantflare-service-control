@@ -42,7 +42,7 @@ type GatewayAccounts interface {
 	CreateKey(context.Context, string, string, string, []string, int) (gateway.CenterCreatedKey, error)
 	RevokeKey(context.Context, string, int) error
 	ProbeKey(context.Context, string, int) (gateway.CenterProbe, error)
-	ExperienceChat(context.Context, string, string, string) (gateway.CenterChatResult, error)
+	ExperienceChat(context.Context, string, int, string, string) (gateway.CenterChatResult, error)
 }
 
 func (s *Service) SetGatewayAccounts(accounts GatewayAccounts) { s.accountGateway = accounts }
