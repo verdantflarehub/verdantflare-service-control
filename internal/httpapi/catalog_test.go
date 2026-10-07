@@ -107,8 +107,17 @@ func TestListedAppAppearsInHubWithoutVersionOrInstallEntitlement(t *testing.T) {
 		t.Fatalf("create: %d %s", created.StatusCode, readBody(t, created))
 	}
 	created.Body.Close()
+	incomplete := request(t, server, http.MethodPatch, "/api/control/ops/apps/blender-mcp", map[string]any{
+		"name": "Blender MCP", "category": "三维创作", "summary": "Blender 场景与动画工具", "channel": "Listed",
+	})
+	if incomplete.StatusCode != http.StatusBadRequest {
+		t.Fatalf("incomplete listing status = %d, want 400", incomplete.StatusCode)
+	}
+	incomplete.Body.Close()
 	listed := request(t, server, http.MethodPatch, "/api/control/ops/apps/blender-mcp", map[string]any{
 		"name": "Blender MCP", "category": "三维创作", "summary": "Blender 场景与动画工具", "channel": "Listed",
+		"developer": "Example Studio", "description": "使用 Blender 创建三维场景。",
+		"showcase": map[string]any{"screenshots": []string{"https://example.test/blender.png"}, "highlights": []string{"场景制作"}},
 	})
 	if listed.StatusCode != http.StatusOK {
 		t.Fatalf("list in Hub: %d %s", listed.StatusCode, readBody(t, listed))
@@ -119,8 +128,21 @@ func TestListedAppAppearsInHubWithoutVersionOrInstallEntitlement(t *testing.T) {
 	var apps []domain.App
 	decode(t, market, &apps)
 	market.Body.Close()
-	if len(apps) != 1 || apps[0].ID != "blender-mcp" || apps[0].Version != "" || apps[0].Entitled || apps[0].Channel != "Listed" {
+	if len(apps) != 1 || apps[0].ID != "blender-mcp" || apps[0].Version != "" || apps[0].Entitled || apps[0].Channel != "Listed" || len(apps[0].Showcase.Screenshots) != 1 {
 		t.Fatalf("unexpected Hub listing: %+v", apps)
+	}
+	legacyUpdate := request(t, server, http.MethodPatch, "/api/control/ops/apps/blender-mcp", map[string]any{
+		"name": "Blender MCP", "category": "三维创作", "summary": "Blender 场景与动画工具", "channel": "Listed",
+		"developer": "Example Studio", "description": "使用 Blender 创建三维场景。",
+	})
+	if legacyUpdate.StatusCode != http.StatusOK {
+		t.Fatalf("legacy update: %d %s", legacyUpdate.StatusCode, readBody(t, legacyUpdate))
+	}
+	var updated domain.ManagedApp
+	decode(t, legacyUpdate, &updated)
+	legacyUpdate.Body.Close()
+	if len(updated.App.Showcase.Screenshots) != 1 {
+		t.Fatal("legacy client update discarded showcase")
 	}
 
 	public := request(t, server, http.MethodGet, "/api/control/public/catalog", nil)

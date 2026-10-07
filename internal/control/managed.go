@@ -15,24 +15,25 @@ import (
 var appIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
 
 type ManagedAppInput struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	GroupID       string `json:"groupId"`
-	Category      string `json:"category"`
-	Summary       string `json:"summary"`
-	Version       string `json:"version"`
-	GPU           string `json:"gpu"`
-	Duration      string `json:"duration"`
-	Icon          string `json:"icon"`
-	Tone          string `json:"tone"`
-	Channel       string `json:"channel"`
-	Developer     string `json:"developer"`
-	Description   string `json:"description"`
-	Memory        string `json:"memory"`
-	Disk          string `json:"disk"`
-	CPU           string `json:"cpu"`
-	PublicIconURL string `json:"publicIconUrl"`
-	PublicVisible bool   `json:"publicVisible"`
+	ID            string              `json:"id"`
+	Name          string              `json:"name"`
+	GroupID       string              `json:"groupId"`
+	Category      string              `json:"category"`
+	Summary       string              `json:"summary"`
+	Version       string              `json:"version"`
+	GPU           string              `json:"gpu"`
+	Duration      string              `json:"duration"`
+	Icon          string              `json:"icon"`
+	Tone          string              `json:"tone"`
+	Channel       string              `json:"channel"`
+	Developer     string              `json:"developer"`
+	Description   string              `json:"description"`
+	Memory        string              `json:"memory"`
+	Disk          string              `json:"disk"`
+	CPU           string              `json:"cpu"`
+	PublicIconURL string              `json:"publicIconUrl"`
+	PublicVisible bool                `json:"publicVisible"`
+	Showcase      *domain.AppShowcase `json:"showcase"`
 }
 
 type CreateManagedOrganizationInput struct {
@@ -65,6 +66,10 @@ func (s *Service) requireOperationsRole(ctx context.Context, subject, role strin
 }
 
 func validateManagedApp(input ManagedAppInput) error {
+	showcase := domain.AppShowcase{}
+	if input.Showcase != nil {
+		showcase = *input.Showcase
+	}
 	if utf8.RuneCountInString(strings.TrimSpace(input.Name)) < 2 {
 		return domain.NewError(400, "app_invalid", "应用名称至少 2 个字符")
 	}
@@ -86,10 +91,41 @@ func validateManagedApp(input ManagedAppInput) error {
 			return domain.NewError(400, "icon_url_invalid", "公开图标须为 HTTPS URL")
 		}
 	}
+	for _, address := range append(append([]string{}, showcase.Screenshots...), showcase.WebsiteURL, showcase.DocsURL, showcase.SourceURL) {
+		if address == "" {
+			continue
+		}
+		parsed, err := url.Parse(address)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+			return domain.NewError(400, "showcase_url_invalid", "展示图片与外部链接须为 HTTPS URL")
+		}
+	}
+	if len(showcase.Screenshots) > 8 || len(showcase.Highlights) > 12 || len(showcase.Permissions) > 12 {
+		return domain.NewError(400, "showcase_limit", "截图最多 8 张，功能与权限最多各 12 条")
+	}
+	for _, screenshot := range showcase.Screenshots {
+		if strings.TrimSpace(screenshot) == "" {
+			return domain.NewError(400, "showcase_image_invalid", "截图 URL 不能为空")
+		}
+	}
+	for _, highlight := range showcase.Highlights {
+		if strings.TrimSpace(highlight) == "" {
+			return domain.NewError(400, "showcase_highlight_invalid", "功能亮点不能为空")
+		}
+	}
+	if input.Channel == "Listed" {
+		if strings.TrimSpace(input.Category) == "" || strings.TrimSpace(input.Summary) == "" || strings.TrimSpace(input.Developer) == "" || strings.TrimSpace(input.Description) == "" || len(showcase.Screenshots) == 0 || len(showcase.Highlights) == 0 {
+			return domain.NewError(400, "listing_incomplete", "上架 Hub 目录须填写分类、简介、开发者、应用介绍、至少一张截图及一条功能亮点")
+		}
+	}
 	return nil
 }
 
 func appFromInput(input ManagedAppInput) domain.App {
+	showcase := domain.AppShowcase{}
+	if input.Showcase != nil {
+		showcase = *input.Showcase
+	}
 	icon, tone := strings.TrimSpace(input.Icon), strings.TrimSpace(input.Tone)
 	if icon == "" {
 		icon = "market"
@@ -97,7 +133,7 @@ func appFromInput(input ManagedAppInput) domain.App {
 	if tone == "" {
 		tone = "mint"
 	}
-	return domain.App{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), GroupID: input.GroupID, Category: strings.TrimSpace(input.Category), Summary: strings.TrimSpace(input.Summary), Version: strings.TrimSpace(input.Version), GPU: strings.TrimSpace(input.GPU), Duration: strings.TrimSpace(input.Duration), Icon: icon, Tone: tone, Channel: input.Channel, Developer: strings.TrimSpace(input.Developer), Description: strings.TrimSpace(input.Description), Memory: strings.TrimSpace(input.Memory), Disk: strings.TrimSpace(input.Disk), CPU: strings.TrimSpace(input.CPU), PublicIconURL: strings.TrimSpace(input.PublicIconURL), PublicVisible: input.PublicVisible}
+	return domain.App{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), GroupID: input.GroupID, Category: strings.TrimSpace(input.Category), Summary: strings.TrimSpace(input.Summary), Version: strings.TrimSpace(input.Version), GPU: strings.TrimSpace(input.GPU), Duration: strings.TrimSpace(input.Duration), Icon: icon, Tone: tone, Channel: input.Channel, Developer: strings.TrimSpace(input.Developer), Description: strings.TrimSpace(input.Description), Memory: strings.TrimSpace(input.Memory), Disk: strings.TrimSpace(input.Disk), CPU: strings.TrimSpace(input.CPU), PublicIconURL: strings.TrimSpace(input.PublicIconURL), PublicVisible: input.PublicVisible, Showcase: showcase}
 }
 
 func (s *Service) CreateManagedApp(ctx context.Context, subject string, input ManagedAppInput) (domain.ManagedApp, error) {
@@ -130,11 +166,14 @@ func (s *Service) UpdateManagedApp(ctx context.Context, subject, id string, inpu
 	if err := s.requireOperationsRole(ctx, subject, "app_ops_admin"); err != nil {
 		return domain.ManagedApp{}, err
 	}
-	if err := validateManagedApp(input); err != nil {
-		return domain.ManagedApp{}, err
-	}
 	current, err := s.repository.ManagedApp(ctx, id)
 	if err != nil {
+		return domain.ManagedApp{}, err
+	}
+	if input.Showcase == nil {
+		input.Showcase = &current.App.Showcase
+	}
+	if err := validateManagedApp(input); err != nil {
 		return domain.ManagedApp{}, err
 	}
 	if input.GroupID != current.App.GroupID {

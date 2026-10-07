@@ -51,26 +51,41 @@ type Overview struct {
 }
 
 type App struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	GroupID       string `json:"groupId,omitempty"`
-	Category      string `json:"category"`
-	Summary       string `json:"summary"`
-	Version       string `json:"version"`
-	Channel       string `json:"channel"`
-	Status        string `json:"status"`
-	Tone          string `json:"tone"`
-	Icon          string `json:"icon"`
-	GPU           string `json:"gpu"`
-	Duration      string `json:"duration"`
-	Developer     string `json:"developer,omitempty"`
-	Description   string `json:"description,omitempty"`
-	Memory        string `json:"memory,omitempty"`
-	Disk          string `json:"disk,omitempty"`
-	CPU           string `json:"cpu,omitempty"`
-	PublicIconURL string `json:"publicIconUrl,omitempty"`
-	PublicVisible bool   `json:"publicVisible"`
-	Entitled      bool   `json:"entitled"`
+	ID            string      `json:"id"`
+	Name          string      `json:"name"`
+	GroupID       string      `json:"groupId,omitempty"`
+	Category      string      `json:"category"`
+	Summary       string      `json:"summary"`
+	Version       string      `json:"version"`
+	Channel       string      `json:"channel"`
+	Status        string      `json:"status"`
+	Tone          string      `json:"tone"`
+	Icon          string      `json:"icon"`
+	GPU           string      `json:"gpu"`
+	Duration      string      `json:"duration"`
+	Developer     string      `json:"developer,omitempty"`
+	Description   string      `json:"description,omitempty"`
+	Memory        string      `json:"memory,omitempty"`
+	Disk          string      `json:"disk,omitempty"`
+	CPU           string      `json:"cpu,omitempty"`
+	PublicIconURL string      `json:"publicIconUrl,omitempty"`
+	PublicVisible bool        `json:"publicVisible"`
+	Entitled      bool        `json:"entitled"`
+	Showcase      AppShowcase `json:"showcase"`
+}
+
+// AppShowcase contains editorial Market content. It is never runtime evidence.
+type AppShowcase struct {
+	Screenshots []string `json:"screenshots"`
+	Highlights  []string `json:"highlights"`
+	WhatsNew    string   `json:"whatsNew"`
+	Permissions []string `json:"permissions"`
+	WebsiteURL  string   `json:"websiteUrl"`
+	DocsURL     string   `json:"docsUrl"`
+	SourceURL   string   `json:"sourceUrl"`
+	License     string   `json:"license"`
+	Languages   string   `json:"languages"`
+	Platforms   string   `json:"platforms"`
 }
 
 // PublicModel contains editorial, public-facing model facts. It is not a
