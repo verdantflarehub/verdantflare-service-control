@@ -252,6 +252,33 @@ func TestManagedAppCanBeVersionlessInternalDraftButNotPreview(t *testing.T) {
 	}
 }
 
+func TestChartAppRequiresBasicsAndCannotPromoteWithoutReleaseEvidence(t *testing.T) {
+	server := newTestServer(t, testConfig())
+	incomplete := request(t, server, http.MethodPost, "/api/control/ops/apps", map[string]any{
+		"id": "chart-incomplete", "name": "Chart App", "groupId": "image",
+	})
+	if incomplete.StatusCode != http.StatusBadRequest {
+		t.Fatalf("incomplete app status = %d, body = %s", incomplete.StatusCode, readBody(t, incomplete))
+	}
+	incomplete.Body.Close()
+
+	created := request(t, server, http.MethodPost, "/api/control/ops/apps", map[string]any{
+		"id": "chart-release", "name": "Chart App", "groupId": "image", "category": "图像", "summary": "工作流应用",
+	})
+	if created.StatusCode != http.StatusCreated {
+		t.Fatalf("create app status = %d, body = %s", created.StatusCode, readBody(t, created))
+	}
+	created.Body.Close()
+
+	preview := request(t, server, http.MethodPatch, "/api/control/ops/apps/chart-release", map[string]any{
+		"name": "Chart App", "groupId": "image", "category": "图像", "summary": "工作流应用", "version": "0.1.0", "channel": "Preview",
+	})
+	if preview.StatusCode != http.StatusConflict {
+		t.Fatalf("preview without evidence status = %d, body = %s", preview.StatusCode, readBody(t, preview))
+	}
+	preview.Body.Close()
+}
+
 func TestManagedWriteRequiresCurrentOperationsRole(t *testing.T) {
 	server := newTestServer(t, testConfig())
 	switched := request(t, server, http.MethodPut, "/api/control/context/active-organization", map[string]string{"organizationId": "org_northshore"})

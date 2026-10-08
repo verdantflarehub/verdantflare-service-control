@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  VERSION: ${{ github.ref == 'refs/heads/dev' && 'service-control-v1.5.8-dev.1' || 'service-control-v1.5.8' }}
+  VERSION: ${{ github.ref == 'refs/heads/dev' && 'service-control-v1.5.9-dev.1' || 'service-control-v1.5.9' }}
 
 concurrency:
   group: verdantflare-service-control-release

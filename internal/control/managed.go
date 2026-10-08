@@ -149,6 +149,9 @@ func (s *Service) CreateManagedApp(ctx context.Context, subject string, input Ma
 	if !appIDPattern.MatchString(input.ID) {
 		return domain.ManagedApp{}, domain.NewError(400, "app_id_invalid", "应用 ID 须为 2–63 位小写字母、数字或连字符")
 	}
+	if input.GroupID != "" && (strings.TrimSpace(input.Category) == "" || strings.TrimSpace(input.Summary) == "") {
+		return domain.ManagedApp{}, domain.NewError(400, "app_basic_info_incomplete", "新应用须填写市场分类和一句话简介")
+	}
 	if err := validateManagedApp(input); err != nil {
 		return domain.ManagedApp{}, err
 	}
@@ -180,6 +183,9 @@ func (s *Service) UpdateManagedApp(ctx context.Context, subject, id string, inpu
 		return domain.ManagedApp{}, domain.NewError(409, "app_group_immutable", "已建应用的分组不能改变")
 	}
 	if current.App.GroupID != "" {
+		if !slices.Contains([]string{"Preview", "Stable"}, current.App.Channel) && slices.Contains([]string{"Preview", "Stable"}, input.Channel) {
+			return domain.ManagedApp{}, domain.NewError(409, "release_evidence_missing", "Chart 预检不能发布应用；须先接入可信制品、隔离渲染及目标 Station 验证证据")
+		}
 		if input.Version != "" {
 			if _, err := s.repository.AppVersion(ctx, id, input.Version); err != nil {
 				return domain.ManagedApp{}, domain.NewError(409, "app_version_not_registered", "目录版本必须选择已登记的候选版本")

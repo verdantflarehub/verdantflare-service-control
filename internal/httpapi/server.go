@@ -72,6 +72,7 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("POST /api/control/ops/apps", server.createManagedApp)
 	mux.HandleFunc("GET /api/control/ops/apps/{appID}", server.getManagedApp)
 	mux.HandleFunc("PATCH /api/control/ops/apps/{appID}", server.updateManagedApp)
+	mux.HandleFunc("POST /api/control/ops/apps/{appID}/chart-audits", server.auditAppChart)
 	mux.HandleFunc("POST /api/control/ops/apps/{appID}/versions", server.createAppVersion)
 	mux.HandleFunc("GET /api/control/ops/apps/{appID}/versions", server.listAppVersions)
 	mux.HandleFunc("GET /api/control/ops/apps/{appID}/versions/{version}", server.getAppVersion)
