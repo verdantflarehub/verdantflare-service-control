@@ -55,13 +55,14 @@ func (s *Service) AuditAppChart(ctx context.Context, subject, appID string, arch
 	if err := s.requireOperationsRole(ctx, subject, "app_ops_admin"); err != nil {
 		return ChartAuditReport{}, err
 	}
-	if _, err := s.repository.ManagedApp(ctx, appID); err != nil {
+	app, err := s.repository.ManagedApp(ctx, appID)
+	if err != nil {
 		return ChartAuditReport{}, err
 	}
-	return inspectChart(appID, archive)
+	return inspectChart(appID, app.App.GroupID, archive)
 }
 
-func inspectChart(appID string, archive []byte) (ChartAuditReport, error) {
+func inspectChart(appID, groupID string, archive []byte) (ChartAuditReport, error) {
 	hash := sha256.Sum256(archive)
 	report := ChartAuditReport{AppID: appID, ArchiveSHA256: hex.EncodeToString(hash[:]), Checks: []ChartAuditCheck{}}
 	files, err := readChartArchive(archive)
@@ -116,7 +117,11 @@ func inspectChart(appID string, archive []byte) (ChartAuditReport, error) {
 	pvcBytes, pvc := files["templates/pvc.yaml"]
 	workloadPresent := deployment && service && (pvc || values.Storage.ExistingClaim != "") && bytes.Contains(deploymentBytes, []byte("kind: Deployment")) && bytes.Contains(serviceBytes, []byte("kind: Service")) && bytes.Contains(serviceBytes, []byte("type: ClusterIP")) && (!pvc || bytes.Contains(pvcBytes, []byte("kind: PersistentVolumeClaim")))
 	add("workload_templates", workloadPresent, "需要 Deployment、显式 ClusterIP Service，以及 PVC 模板或已声明的现有 PVC")
-	add("gpu_resources", valuesValid && positiveResource(values.Resources.Requests["nvidia.com/gpu"]) && positiveResource(values.Resources.Limits["nvidia.com/gpu"]), "ComfyUI 的 GPU requests/limits 必须明确声明；目标 Station 仍需容量预检")
+	if groupID == "agent" {
+		add("gpu_resources", valuesValid && values.Resources.Requests["nvidia.com/gpu"] == nil && values.Resources.Limits["nvidia.com/gpu"] == nil, "Agent 目录候选默认不申请 GPU；如需本地模型，另行审核资源与目标 Station")
+	} else {
+		add("gpu_resources", valuesValid && positiveResource(values.Resources.Requests["nvidia.com/gpu"]) && positiveResource(values.Resources.Limits["nvidia.com/gpu"]), "GPU 应用须明确声明 requests/limits；目标 Station 仍需容量预检")
+	}
 	add("storage", valuesValid && ((values.Storage.Create && pvc && values.Storage.Size != "" && values.Storage.StorageClassName != "") || values.Storage.ExistingClaim != ""), "须指定工作卷容量及目标 StorageClass，或提供已授权的现有 PVC；目标容量仍需预检")
 	unsafe := embeddedCredentialPattern.Match(valueBytes)
 	dependencies := len(metadata.Dependencies) > 0

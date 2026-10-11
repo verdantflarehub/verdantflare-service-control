@@ -76,8 +76,8 @@ func validateManagedApp(input ManagedAppInput) error {
 	if !slices.Contains([]string{"Candidate", "Listed", "Preview", "Stable", "Paused"}, input.Channel) {
 		return domain.NewError(400, "channel_invalid", "不支持的发布通道")
 	}
-	if input.GroupID != "" && !slices.Contains([]string{"image", "music", "video"}, input.GroupID) {
-		return domain.NewError(400, "app_group_invalid", "应用分组须为 image、music 或 video")
+	if input.GroupID != "" && !slices.Contains([]string{"image", "music", "video", "agent"}, input.GroupID) {
+		return domain.NewError(400, "app_group_invalid", "应用分组须为 image、music、video 或 agent")
 	}
 	if slices.Contains([]string{"Preview", "Stable"}, input.Channel) && strings.TrimSpace(input.Version) == "" {
 		return domain.NewError(400, "app_version_required", "公开或预览应用的目录版本不能为空；资料草稿可以留空")

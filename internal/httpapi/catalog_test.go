@@ -170,6 +170,45 @@ func TestListedAppAppearsInHubWithoutVersionOrInstallEntitlement(t *testing.T) {
 	invalid.Body.Close()
 }
 
+func TestAgentDirectoryListingDoesNotBecomeInstallable(t *testing.T) {
+	repository := store.NewMemoryBootstrap()
+	service := control.NewService(repository)
+	server := httptest.NewServer(httpapi.New(config.Config{Environment: "test", DevLoginSubject: "00000000-0000-4000-8000-000000000001"}, service, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	defer server.Close()
+
+	created := request(t, server, http.MethodPost, "/api/control/ops/apps", map[string]any{
+		"id": "hermes-agent", "name": "Hermes Agent", "groupId": "agent", "category": "AI 智能体", "summary": "个人智能体",
+	})
+	if created.StatusCode != http.StatusCreated {
+		t.Fatalf("create agent: %d %s", created.StatusCode, readBody(t, created))
+	}
+	created.Body.Close()
+	listed := request(t, server, http.MethodPatch, "/api/control/ops/apps/hermes-agent", map[string]any{
+		"name": "Hermes Agent", "groupId": "agent", "category": "AI 智能体", "summary": "个人智能体",
+		"channel": "Listed", "developer": "Nous Research", "description": "上游资料展示；尚未安装。",
+		"showcase": map[string]any{"screenshots": []string{"https://example.test/hermes.png"}, "highlights": []string{"对话与工具"}},
+	})
+	if listed.StatusCode != http.StatusOK {
+		t.Fatalf("list agent: %d %s", listed.StatusCode, readBody(t, listed))
+	}
+	listed.Body.Close()
+	market := request(t, server, http.MethodGet, "/api/control/market/apps", nil)
+	var apps []domain.App
+	decode(t, market, &apps)
+	market.Body.Close()
+	if len(apps) != 1 || apps[0].GroupID != "agent" || apps[0].Channel != "Listed" || apps[0].Version != "" || apps[0].Entitled {
+		t.Fatalf("unexpected agent listing: %+v", apps)
+	}
+	promote := request(t, server, http.MethodPatch, "/api/control/ops/apps/hermes-agent", map[string]any{
+		"name": "Hermes Agent", "groupId": "agent", "category": "AI 智能体", "summary": "个人智能体",
+		"channel": "Preview", "version": "0.1.0", "developer": "Nous Research", "description": "待验收。",
+	})
+	if promote.StatusCode != http.StatusConflict {
+		t.Fatalf("preview without release evidence: %d %s", promote.StatusCode, readBody(t, promote))
+	}
+	promote.Body.Close()
+}
+
 func TestPublishedModelsFollowGatewayForWWWAndHub(t *testing.T) {
 	gateway := &catalogGateway{models: map[string]struct{}{
 		"verdantflare-sd2": {}, "deepseek-flash": {}, "deepseek-v4-pro": {},

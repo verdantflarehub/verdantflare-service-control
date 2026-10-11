@@ -39,7 +39,7 @@ func TestChartAuditBlocksPlaceholderAndNeverClaimsDeployable(t *testing.T) {
 		"comfyui/templates/service.yaml":    "kind: Service\nspec:\n  type: ClusterIP\n",
 		"comfyui/templates/pvc.yaml":        "kind: PersistentVolumeClaim\n",
 	})
-	report, err := inspectChart("comfyui", archive)
+	report, err := inspectChart("comfyui", "image", archive)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestChartAuditBlocksPlaceholderAndNeverClaimsDeployable(t *testing.T) {
 func TestChartAuditRejectsTraversalAndLinks(t *testing.T) {
 	for _, name := range []string{"comfyui/../secret.yaml", "/etc/passwd", "comfyui/../../secrets"} {
 		archive := chartArchiveForTest(t, map[string]string{name: "unexpected"})
-		if _, err := inspectChart("comfyui", archive); err == nil {
+		if _, err := inspectChart("comfyui", "image", archive); err == nil {
 			t.Fatalf("accepted unsafe path: %q", name)
 		}
 	}
@@ -71,7 +71,7 @@ func TestChartAuditRejectsTraversalAndLinks(t *testing.T) {
 	}
 	tw.Close()
 	gz.Close()
-	if _, err := inspectChart("comfyui", output.Bytes()); err == nil {
+	if _, err := inspectChart("comfyui", "image", output.Bytes()); err == nil {
 		t.Fatal("accepted symbolic link in chart archive")
 	}
 }
