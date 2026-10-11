@@ -9,4 +9,15 @@ CREATE TABLE IF NOT EXISTS control_model_provider_icons (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- The migration may be executed by a privileged maintenance role. Keep the
+-- icon table owned by the same application role as the existing repository.
+DO $$
+DECLARE
+    repository_owner TEXT;
+BEGIN
+    SELECT pg_get_userbyid(relowner) INTO repository_owner
+    FROM pg_class WHERE oid = 'public.control_repository_state'::regclass;
+    EXECUTE format('ALTER TABLE public.control_model_provider_icons OWNER TO %I', repository_owner);
+END $$;
+
 COMMIT;
