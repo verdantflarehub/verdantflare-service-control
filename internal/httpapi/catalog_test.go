@@ -219,7 +219,7 @@ func TestPublishedModelsFollowGatewayForWWWAndHub(t *testing.T) {
 	defer server.Close()
 
 	for _, id := range []string{"verdantflare-sd2", "deepseek-flash", "deepseek-v4-pro"} {
-		input := domain.PublicModel{ID: id, Name: "Model " + id, Provider: "Verified", Summary: "Reviewed description", Categories: []string{"文本生成"}}
+		input := domain.PublicModel{ID: id, Name: "Model " + id, Provider: "Verified", ProviderIconURL: "https://example.com/provider.png", Summary: "Reviewed description", Categories: []string{"文本生成"}}
 		created := request(t, server, http.MethodPost, "/api/control/ops/models", input)
 		if created.StatusCode != http.StatusCreated {
 			t.Fatalf("create %s: %d %s", id, created.StatusCode, readBody(t, created))
@@ -246,12 +246,22 @@ func TestPublishedModelsFollowGatewayForWWWAndHub(t *testing.T) {
 	if len(catalog.Models) != 3 {
 		t.Fatalf("WWW models = %d, want 3", len(catalog.Models))
 	}
+	for _, model := range catalog.Models {
+		if model.ProviderIconURL != "https://example.com/provider.png" {
+			t.Fatalf("WWW model %s lost provider icon: %q", model.ID, model.ProviderIconURL)
+		}
+	}
 	hub := request(t, server, http.MethodGet, "/api/control/api/models", nil)
 	var hubModels []domain.Model
 	decode(t, hub, &hubModels)
 	hub.Body.Close()
 	if len(hubModels) != 3 {
 		t.Fatalf("Hub models = %d, want 3", len(hubModels))
+	}
+	for _, model := range hubModels {
+		if model.ProviderIconURL != "https://example.com/provider.png" {
+			t.Fatalf("Hub model %s lost provider icon: %q", model.ID, model.ProviderIconURL)
+		}
 	}
 
 	delete(gateway.models, "deepseek-v4-pro")
@@ -291,6 +301,21 @@ func TestCannotPublishModelAbsentFromGateway(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusConflict {
 		t.Fatalf("publish missing model = %d, want 409", response.StatusCode)
+	}
+}
+
+func TestManagedModelRejectsUnsafeProviderIconURL(t *testing.T) {
+	service := control.NewService(store.NewMemoryBootstrap(), &catalogGateway{models: map[string]struct{}{}})
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := httptest.NewServer(httpapi.New(config.Config{Environment: "test", DevLoginSubject: "00000000-0000-4000-8000-000000000001"}, service, logger))
+	defer server.Close()
+	for _, iconURL := range []string{"http://example.com/logo.png", "https://user:password@example.com/logo.png", "data:image/svg+xml,unsafe"} {
+		input := domain.PublicModel{ID: "icon-check", Name: "Icon Check", Provider: "Provider", ProviderIconURL: iconURL, Summary: "Description", Categories: []string{"文本生成"}}
+		response := request(t, server, http.MethodPost, "/api/control/ops/models", input)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("unsafe provider icon %q returned %d, want 400", iconURL, response.StatusCode)
+		}
 	}
 }
 

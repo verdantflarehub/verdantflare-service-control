@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"net/url"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -90,6 +91,12 @@ func (s *Service) ListManagedModels(ctx context.Context, subject string) ([]doma
 }
 
 func validatePublicModel(model domain.PublicModel) error {
+	if model.ProviderIconURL != "" {
+		parsed, err := url.Parse(model.ProviderIconURL)
+		if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || len(model.ProviderIconURL) > 2048 {
+			return domain.NewError(400, "provider_icon_url_invalid", "提供方图标必须是无凭据的 HTTPS 图片地址")
+		}
+	}
 	if model.ExperienceMode != "" && model.ExperienceMode != "chat" {
 		return domain.NewError(400, "experience_mode_invalid", "不支持该模型体验方式")
 	}

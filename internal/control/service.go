@@ -293,7 +293,7 @@ func (s *Service) ListModels(ctx context.Context, subject string) ([]domain.Mode
 			category = item.Categories[0]
 		}
 		models = append(models, domain.Model{
-			ID: item.ID, Name: item.Name, Provider: item.Provider,
+			ID: item.ID, Name: item.Name, Provider: item.Provider, ProviderIconURL: item.ProviderIconURL,
 			Type: category, Context: item.Context, Status: "网关已列出",
 			InputPrice: item.InputPrice, OutputPrice: item.OutputPrice,
 			CachePrice: item.CachePrice, PriceUnit: item.PriceUnit,
