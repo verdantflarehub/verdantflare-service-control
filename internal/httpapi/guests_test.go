@@ -58,3 +58,34 @@ func TestGuestHTTPBindingUpdatesContextAndMemberList(t *testing.T) {
 		t.Fatalf("members: %+v %v", organization.Members, err)
 	}
 }
+
+func TestSettingsPickerAndOperationsTransferHTTP(t *testing.T) {
+	ctx := context.Background()
+	repository := store.NewMemoryBootstrap()
+	if _, err := repository.CreateManagedOrganization(ctx, domain.Organization{OrganizationID: "org_demo", Name: "演示组织"}); err != nil {
+		t.Fatal(err)
+	}
+	service := control.NewService(repository)
+	service.SetLoginDirectory(directoryStub{gateway.LoginDirectoryUser{ID: "new-login-user", Email: "new@example.test", Status: "active", EmailVerified: true}})
+	server := httptest.NewServer(httpapi.New(config.Config{DevLoginSubject: "00000000-0000-4000-8000-000000000001"}, service, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	defer server.Close()
+	for _, check := range []struct {
+		method string
+		path   string
+		body   map[string]string
+	}{
+		{http.MethodGet, "/api/control/settings/guests", nil},
+		{http.MethodPost, "/api/control/settings/members/bind", map[string]string{"loginUserId": "new-login-user", "role": "成员"}},
+		{http.MethodPost, "/api/control/ops/organizations/org_verdantflare/members/new-login-user/transfer", map[string]string{"targetOrganizationId": "org_demo", "role": "开发者"}},
+	} {
+		response := request(t, server, check.method, check.path, check.body)
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("%s %s: %d %s", check.method, check.path, response.StatusCode, readBody(t, response))
+		}
+		response.Body.Close()
+	}
+	center, err := repository.CenterContext(ctx, "new-login-user")
+	if err != nil || center.ActiveOrganizationID != "org_demo" || len(center.Organizations) != 1 || center.Organizations[0].Roles[0] != "developer" {
+		t.Fatalf("context after transfer: %+v %v", center, err)
+	}
+}

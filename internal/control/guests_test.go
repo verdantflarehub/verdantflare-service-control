@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/gateway"
@@ -13,6 +14,47 @@ import (
 type fakeDirectory struct {
 	users []gateway.LoginDirectoryUser
 	fail  bool
+}
+
+func TestOrganizationAdminSelectsUnboundUserAndTransfersOnlyBetweenManagedOrganizations(t *testing.T) {
+	ctx := context.Background()
+	repository := store.NewMemorySeeded(time.Now().UTC())
+	directory := &fakeDirectory{users: []gateway.LoginDirectoryUser{{ID: "new-user", Email: "new@example.test", Status: "active", EmailVerified: true}}}
+	service := NewService(repository)
+	service.SetLoginDirectory(directory)
+	const admin = "00000000-0000-4000-8000-000000000001"
+	page, err := service.ListCurrentOrganizationGuests(ctx, admin, "", "", 50)
+	if err != nil || len(page.Users) != 1 || page.Users[0].ID != "new-user" {
+		t.Fatalf("unbound selection = %+v, %v", page, err)
+	}
+	member, err := service.BindCurrentOrganizationMember(ctx, admin, BindMemberInput{LoginUserID: "new-user", Role: "成员"})
+	if err != nil || member.ID != "new-user" {
+		t.Fatalf("bind current organization = %+v, %v", member, err)
+	}
+	page, err = service.ListCurrentOrganizationGuests(ctx, admin, "", "", 50)
+	if err != nil || len(page.Users) != 0 {
+		t.Fatalf("bound user remained selectable = %+v, %v", page, err)
+	}
+	moved, err := service.TransferCurrentOrganizationMember(ctx, admin, member.ID, TransferMemberInput{TargetOrganizationID: "org_northshore", Role: "开发者"})
+	if err != nil || moved.Role != "开发者" {
+		t.Fatalf("transfer = %+v, %v", moved, err)
+	}
+	context, err := repository.CenterContext(ctx, member.ID)
+	if err != nil || context.ActiveOrganizationID != "org_northshore" || len(context.Organizations) != 1 {
+		t.Fatalf("transferred context = %+v, %v", context, err)
+	}
+
+	sourceOnly, err := repository.BindLoginUser(ctx, "org_verdantflare", "source-admin", "source-admin@example.test", "组织管理员")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := repository.BindLoginUser(ctx, "org_verdantflare", "other-user", "other@example.test", "成员")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.TransferCurrentOrganizationMember(ctx, sourceOnly.ID, other.ID, TransferMemberInput{TargetOrganizationID: "org_northshore", Role: "成员"}); err == nil {
+		t.Fatal("source-only administrator transferred a member into an unmanaged target")
+	}
 }
 
 func (d *fakeDirectory) ListUsers(_ context.Context, _, _ string, _ int) (gateway.LoginDirectoryPage, error) {

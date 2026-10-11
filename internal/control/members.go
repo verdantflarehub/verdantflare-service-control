@@ -29,10 +29,30 @@ type BindMemberInput struct {
 	Role        string `json:"role"`
 }
 
+type TransferMemberInput struct {
+	TargetOrganizationID string `json:"targetOrganizationId"`
+	Role                 string `json:"role"`
+}
+
 func (s *Service) ListGuests(ctx context.Context, subject, cursor, query string, limit int) (GuestPage, error) {
 	if err := s.requireOperationsRole(ctx, subject, "customer_success_admin"); err != nil {
 		return GuestPage{}, err
 	}
+	return s.listGuests(ctx, cursor, query, limit)
+}
+
+func (s *Service) ListCurrentOrganizationGuests(ctx context.Context, subject, cursor, query string, limit int) (GuestPage, error) {
+	_, roles, _, err := s.activeOrganization(ctx, subject)
+	if err != nil {
+		return GuestPage{}, err
+	}
+	if !hasAnyRole(roles, "organization_admin") {
+		return GuestPage{}, domain.NewError(403, "member_bind_forbidden", "当前角色不能配置组织成员")
+	}
+	return s.listGuests(ctx, cursor, query, limit)
+}
+
+func (s *Service) listGuests(ctx context.Context, cursor, query string, limit int) (GuestPage, error) {
 	if s.loginDirectory == nil {
 		return GuestPage{}, domain.NewError(503, "login_directory_unavailable", "Login 用户目录尚未配置")
 	}
@@ -60,6 +80,21 @@ func (s *Service) BindManagedMember(ctx context.Context, subject, organizationID
 	if err := s.requireOperationsRole(ctx, subject, "customer_success_admin"); err != nil {
 		return domain.Member{}, err
 	}
+	return s.bindMember(ctx, organizationID, input)
+}
+
+func (s *Service) BindCurrentOrganizationMember(ctx context.Context, subject string, input BindMemberInput) (domain.Member, error) {
+	organization, roles, _, err := s.activeOrganization(ctx, subject)
+	if err != nil {
+		return domain.Member{}, err
+	}
+	if !hasAnyRole(roles, "organization_admin") {
+		return domain.Member{}, domain.NewError(403, "member_bind_forbidden", "当前角色不能配置组织成员")
+	}
+	return s.bindMember(ctx, organization.OrganizationID, input)
+}
+
+func (s *Service) bindMember(ctx context.Context, organizationID string, input BindMemberInput) (domain.Member, error) {
 	if s.loginDirectory == nil {
 		return domain.Member{}, domain.NewError(503, "login_directory_unavailable", "Login 用户目录尚未配置")
 	}
@@ -78,6 +113,45 @@ func (s *Service) BindManagedMember(ctx context.Context, subject, organizationID
 		return domain.Member{}, domain.NewError(409, "login_user_ineligible", "用户未完成邮箱验证或账号已停用")
 	}
 	return s.repository.BindLoginUser(ctx, organizationID, user.ID, user.Email, input.Role)
+}
+
+func (s *Service) TransferManagedMember(ctx context.Context, subject, sourceID, memberID string, input TransferMemberInput) (domain.Member, error) {
+	if err := s.requireOperationsRole(ctx, subject, "customer_success_admin"); err != nil {
+		return domain.Member{}, err
+	}
+	return s.transferMember(ctx, sourceID, memberID, subject, input)
+}
+
+func (s *Service) TransferCurrentOrganizationMember(ctx context.Context, subject, memberID string, input TransferMemberInput) (domain.Member, error) {
+	organization, roles, _, err := s.activeOrganization(ctx, subject)
+	if err != nil {
+		return domain.Member{}, err
+	}
+	if !hasAnyRole(roles, "organization_admin") {
+		return domain.Member{}, domain.NewError(403, "member_transfer_forbidden", "当前角色不能调整成员组织")
+	}
+	center, err := s.repository.CenterContext(ctx, subject)
+	if err != nil {
+		return domain.Member{}, err
+	}
+	targetAdmin := false
+	for _, candidate := range center.Organizations {
+		if candidate.OrganizationID == input.TargetOrganizationID && slices.Contains(candidate.Roles, "organization_admin") {
+			targetAdmin = true
+			break
+		}
+	}
+	if !targetAdmin {
+		return domain.Member{}, domain.NewError(403, "member_transfer_forbidden", "需同时具备目标组织管理员权限")
+	}
+	return s.transferMember(ctx, organization.OrganizationID, memberID, subject, input)
+}
+
+func (s *Service) transferMember(ctx context.Context, sourceID, memberID, actorSubject string, input TransferMemberInput) (domain.Member, error) {
+	if strings.TrimSpace(input.TargetOrganizationID) == "" || len(input.TargetOrganizationID) > 128 || !slices.Contains(memberRoles, input.Role) || strings.TrimSpace(memberID) == "" {
+		return domain.Member{}, domain.NewError(400, "member_transfer_invalid", "目标组织或成员角色无效")
+	}
+	return s.repository.TransferLoginUser(ctx, sourceID, input.TargetOrganizationID, memberID, input.Role, actorSubject)
 }
 
 func (s *Service) createMember(ctx context.Context, organizationID string, input InviteMemberInput) (domain.Member, error) {

@@ -59,6 +59,9 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("PATCH /api/control/settings/organization", server.updateOrganization)
 	mux.HandleFunc("GET /api/control/settings/members", server.listMembers)
 	mux.HandleFunc("POST /api/control/settings/members", server.inviteMember)
+	mux.HandleFunc("GET /api/control/settings/guests", server.listCurrentOrganizationGuests)
+	mux.HandleFunc("POST /api/control/settings/members/bind", server.bindCurrentOrganizationMember)
+	mux.HandleFunc("POST /api/control/settings/members/{memberID}/transfer", server.transferCurrentOrganizationMember)
 	mux.HandleFunc("PATCH /api/control/settings/members/{memberID}", server.updateMember)
 	mux.HandleFunc("GET /api/control/settings/billing", server.getBilling)
 
@@ -89,6 +92,7 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("POST /api/control/ops/organizations/{organizationID}/members", server.createManagedMember)
 	mux.HandleFunc("GET /api/control/ops/guests", server.listGuests)
 	mux.HandleFunc("POST /api/control/ops/organizations/{organizationID}/members/bind", server.bindManagedMember)
+	mux.HandleFunc("POST /api/control/ops/organizations/{organizationID}/members/{memberID}/transfer", server.transferManagedMember)
 	mux.HandleFunc("PATCH /api/control/ops/organizations/{organizationID}/members/{memberID}", server.updateManagedMember)
 
 	server.handler = server.middleware(mux)

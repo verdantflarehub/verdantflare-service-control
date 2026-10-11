@@ -96,6 +96,78 @@ func (m *Memory) BindLoginUser(_ context.Context, organizationID, subject, email
 	return domain.Member{}, domain.NewError(500, "member_bind_failed", "成员绑定失败")
 }
 
+func (m *Memory) TransferLoginUser(_ context.Context, sourceID, targetID, memberID, role, actorSubject string) (domain.Member, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if sourceID == targetID {
+		return domain.Member{}, domain.NewError(400, "member_transfer_same_organization", "请选择不同的目标组织")
+	}
+	if memberID == actorSubject {
+		return domain.Member{}, domain.NewError(409, "self_change_forbidden", "不能调整自己的组织")
+	}
+	if _, exists := m.organizations[sourceID]; !exists {
+		return domain.Member{}, domain.NewError(404, "organization_not_found", "来源组织不存在")
+	}
+	target, exists := m.organizations[targetID]
+	if !exists {
+		return domain.Member{}, domain.NewError(404, "organization_not_found", "目标组织不存在")
+	}
+	if target.Status == "冻结" {
+		return domain.Member{}, domain.NewError(409, "organization_frozen", "目标组织已冻结")
+	}
+	user, exists := m.users[memberID]
+	if !exists {
+		return domain.Member{}, domain.NewError(404, "member_not_found", "已绑定成员不存在")
+	}
+	source, hasSource := membershipFor(user, sourceID)
+	if !hasSource {
+		return domain.Member{}, domain.NewError(409, "member_transfer_conflict", "成员已不属于来源组织，请刷新后重试")
+	}
+	if _, hasTarget := membershipFor(user, targetID); hasTarget {
+		return domain.Member{}, domain.NewError(409, "member_transfer_conflict", "成员已属于目标组织")
+	}
+	for _, role := range source.Roles {
+		if role == "customer_success_admin" || role == "app_ops_admin" || role == "api_ops_admin" {
+			return domain.Member{}, domain.NewError(409, "protected_member_transfer", "内部运营账号不能通过成员转移变更")
+		}
+	}
+	if source.Status != "" && source.Status != "正常" && source.Status != "停用" {
+		return domain.Member{}, domain.NewError(409, "member_transfer_conflict", "成员状态不支持转移")
+	}
+	if source.Status != "停用" && memberRole(source.Roles) == "组织管理员" && m.activeAdminCountLocked(sourceID) <= 1 {
+		return domain.Member{}, domain.NewError(409, "last_admin_forbidden", "不能转移最后一位组织管理员")
+	}
+	remaining := make([]domain.Membership, 0, len(user.Memberships))
+	for _, membership := range user.Memberships {
+		if membership.OrganizationID != sourceID {
+			remaining = append(remaining, membership)
+		}
+	}
+	status := source.Status
+	if status == "" {
+		status = "正常"
+	}
+	user.Memberships = append(remaining, domain.Membership{OrganizationID: targetID, Roles: []string{memberRoleKey(role)}, Status: status})
+	if user.ActiveOrganizationID == sourceID {
+		user.ActiveOrganizationID = targetID
+	}
+	m.users[memberID] = user
+	// A historical unbound invitation for the same email is not a second member.
+	pending := m.members[targetID][:0]
+	for _, member := range m.members[targetID] {
+		if !strings.EqualFold(member.Email, user.Email) {
+			pending = append(pending, member)
+		}
+	}
+	m.members[targetID] = pending
+	for _, member := range m.membersForLocked(targetID) {
+		if member.ID == memberID {
+			return member, nil
+		}
+	}
+	return domain.Member{}, domain.NewError(500, "member_transfer_failed", "成员组织调整失败")
+}
+
 func (m *Memory) membersForLocked(organizationID string) []domain.Member {
 	result := make([]domain.Member, 0, len(m.members[organizationID])+len(m.users))
 	boundEmails := map[string]bool{}
