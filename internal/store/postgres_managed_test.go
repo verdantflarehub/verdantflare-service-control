@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -61,6 +62,11 @@ func TestManagedAppSurvivesPostgresReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	iconBytes := []byte(fmt.Sprintf("icon-persistence-%d", time.Now().UnixNano()))
+	iconDigest := fmt.Sprintf("%x", sha256.Sum256(iconBytes))
+	if err := first.PutModelProviderIcon(ctx, domain.ModelProviderIcon{SHA256: iconDigest, ContentType: "image/png", Data: iconBytes, Width: 32, Height: 32}); err != nil {
+		t.Fatal(err)
+	}
 	_, err = first.UpdateManagedModel(ctx, modelID, domain.PublicModel{ID: modelID, Name: "Catalog Persistence", Provider: "Provider", Summary: "Reviewed", Categories: []string{"文本生成"}, InputPrice: "12", PriceUnit: "点/百万 tokens", PublicVisible: true, ExperienceMode: "chat"})
 	if err != nil {
 		t.Fatal(err)
@@ -100,6 +106,10 @@ func TestManagedAppSurvivesPostgresReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.Close()
+	reloadedIcon, err := second.ModelProviderIcon(ctx, iconDigest)
+	if err != nil || !bytes.Equal(reloadedIcon.Data, iconBytes) {
+		t.Fatalf("provider icon did not survive reopen: %+v %v", reloadedIcon, err)
+	}
 	catalog, err := second.PublicCatalog(ctx)
 	if err != nil {
 		t.Fatal(err)

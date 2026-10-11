@@ -26,6 +26,7 @@ type Memory struct {
 	apiKeys       map[string]domain.APIKey
 	models        []domain.Model
 	publicModels  map[string]domain.PublicModel
+	modelIcons    map[string]domain.ModelProviderIcon
 	tasks         []domain.APITask
 	members       map[string][]domain.Member
 	billing       map[string]domain.BillingSummary

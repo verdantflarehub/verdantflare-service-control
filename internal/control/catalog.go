@@ -1,14 +1,83 @@
 package control
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
+	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
 )
+
+const modelIconPathPrefix = "/api/control/public/model-icons/"
+const maxModelIconBytes = 1 << 20
+
+var modelIconDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+
+type ModelProviderIconUpload struct {
+	ProviderIconURL string `json:"providerIconUrl"`
+	SHA256          string `json:"sha256"`
+	Width           int    `json:"width"`
+	Height          int    `json:"height"`
+}
+
+func InvalidModelIconUpload() error {
+	return domain.NewError(400, "model_icon_invalid", "请上传不超过 1 MiB、尺寸为 16～4096 像素的 PNG 或 JPEG 图片")
+}
+
+func (s *Service) UploadModelProviderIcon(ctx context.Context, subject string, data []byte) (ModelProviderIconUpload, error) {
+	if err := s.requireOperationsRole(ctx, subject, "api_ops_admin"); err != nil {
+		return ModelProviderIconUpload{}, err
+	}
+	if len(data) == 0 || len(data) > maxModelIconBytes {
+		return ModelProviderIconUpload{}, InvalidModelIconUpload()
+	}
+	contentType := http.DetectContentType(data)
+	if contentType != "image/png" && contentType != "image/jpeg" {
+		return ModelProviderIconUpload{}, InvalidModelIconUpload()
+	}
+	config, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || (format != "png" && format != "jpeg") || config.Width < 16 || config.Height < 16 || config.Width > 4096 || config.Height > 4096 ||
+		(format == "png" && contentType != "image/png") || (format == "jpeg" && contentType != "image/jpeg") {
+		return ModelProviderIconUpload{}, InvalidModelIconUpload()
+	}
+	if _, _, err := image.Decode(bytes.NewReader(data)); err != nil {
+		return ModelProviderIconUpload{}, InvalidModelIconUpload()
+	}
+	digest := sha256.Sum256(data)
+	icon := domain.ModelProviderIcon{SHA256: hex.EncodeToString(digest[:]), ContentType: contentType, Data: data, Width: config.Width, Height: config.Height}
+	if err := s.repository.PutModelProviderIcon(ctx, icon); err != nil {
+		return ModelProviderIconUpload{}, err
+	}
+	return ModelProviderIconUpload{ProviderIconURL: modelIconPathPrefix + icon.SHA256, SHA256: icon.SHA256, Width: icon.Width, Height: icon.Height}, nil
+}
+
+func (s *Service) ModelProviderIcon(ctx context.Context, digest string) (domain.ModelProviderIcon, error) {
+	if !modelIconDigestPattern.MatchString(digest) {
+		return domain.ModelProviderIcon{}, domain.NewError(404, "model_icon_not_found", "模型图标不存在")
+	}
+	return s.repository.ModelProviderIcon(ctx, digest)
+}
+
+func (s *Service) validateProviderIconReference(ctx context.Context, iconURL string) error {
+	if !strings.HasPrefix(iconURL, modelIconPathPrefix) {
+		return nil
+	}
+	_, err := s.ModelProviderIcon(ctx, strings.TrimPrefix(iconURL, modelIconPathPrefix))
+	if err != nil {
+		return domain.NewError(400, "provider_icon_url_invalid", "上传的提供方图标不存在，请重新上传")
+	}
+	return nil
+}
 
 func (s *Service) PublicCatalog(ctx context.Context) (domain.PublicCatalog, error) {
 	catalog, err := s.repository.PublicCatalog(ctx)
@@ -92,9 +161,15 @@ func (s *Service) ListManagedModels(ctx context.Context, subject string) ([]doma
 
 func validatePublicModel(model domain.PublicModel) error {
 	if model.ProviderIconURL != "" {
-		parsed, err := url.Parse(model.ProviderIconURL)
-		if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || len(model.ProviderIconURL) > 2048 {
-			return domain.NewError(400, "provider_icon_url_invalid", "提供方图标必须是无凭据的 HTTPS 图片地址")
+		if strings.HasPrefix(model.ProviderIconURL, modelIconPathPrefix) {
+			if !modelIconDigestPattern.MatchString(strings.TrimPrefix(model.ProviderIconURL, modelIconPathPrefix)) {
+				return domain.NewError(400, "provider_icon_url_invalid", "上传的提供方图标地址无效")
+			}
+		} else {
+			parsed, err := url.Parse(model.ProviderIconURL)
+			if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || len(model.ProviderIconURL) > 2048 {
+				return domain.NewError(400, "provider_icon_url_invalid", "提供方图标必须是无凭据的 HTTPS 图片地址或上传后的同源地址")
+			}
 		}
 	}
 	if model.ExperienceMode != "" && model.ExperienceMode != "chat" {
@@ -133,6 +208,9 @@ func (s *Service) CreateManagedModel(ctx context.Context, subject string, model 
 	if err := validatePublicModel(model); err != nil {
 		return domain.PublicModel{}, err
 	}
+	if err := s.validateProviderIconReference(ctx, model.ProviderIconURL); err != nil {
+		return domain.PublicModel{}, err
+	}
 	return s.repository.CreateManagedModel(ctx, model)
 }
 
@@ -142,6 +220,9 @@ func (s *Service) UpdateManagedModel(ctx context.Context, subject, id string, mo
 	}
 	model.ID = id
 	if err := validatePublicModel(model); err != nil {
+		return domain.PublicModel{}, err
+	}
+	if err := s.validateProviderIconReference(ctx, model.ProviderIconURL); err != nil {
 		return domain.PublicModel{}, err
 	}
 	if model.PublicVisible || model.ExperienceMode != "" {

@@ -113,6 +113,14 @@ type PublicCatalog struct {
 	Apps   []PublicApp   `json:"apps"`
 }
 
+type ModelProviderIcon struct {
+	SHA256      string `json:"sha256"`
+	ContentType string `json:"-"`
+	Data        []byte `json:"-"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+}
+
 type PublicApp struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`

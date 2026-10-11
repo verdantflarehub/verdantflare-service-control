@@ -57,6 +57,8 @@ type Repository interface {
 	ListManagedModels(context.Context) ([]domain.PublicModel, error)
 	CreateManagedModel(context.Context, domain.PublicModel) (domain.PublicModel, error)
 	UpdateManagedModel(context.Context, string, domain.PublicModel) (domain.PublicModel, error)
+	PutModelProviderIcon(context.Context, domain.ModelProviderIcon) error
+	ModelProviderIcon(context.Context, string) (domain.ModelProviderIcon, error)
 	CreateManagedOrganization(context.Context, domain.Organization) (domain.ManagedOrganization, error)
 	ManagedOrganization(context.Context, string) (domain.ManagedOrganization, error)
 	UpdateManagedOrganization(context.Context, string, domain.Organization, []string, int) (domain.ManagedOrganization, error)

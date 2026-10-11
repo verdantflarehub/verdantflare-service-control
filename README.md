@@ -116,6 +116,6 @@ make vet
 make build
 ```
 
-持久化回归测试使用独立、可丢弃的 PostgreSQL 数据库。先应用 `migrations/postgres/001_init.sql`，再设置 `CONTROL_TEST_DATABASE_URL` 运行 `go test ./internal/store -run TestManagedAppSurvivesPostgresReopen -v`。
+持久化回归测试使用独立、可丢弃的 PostgreSQL 数据库。先应用 `migrations/postgres/001_init.sql` 与 `migrations/postgres/004_model_provider_icons.sql`，再设置 `CONTROL_TEST_DATABASE_URL` 运行 `go test ./internal/store -run TestManagedAppSurvivesPostgresReopen -v`。生产环境须在更新 Control 镜像前应用 `004_model_provider_icons.sql`；旧模型仍可继续使用 HTTPS 官方图片地址。
 
 也可在工作区根目录运行 `scripts/tests/hub_control_integration.sh`，自动使用临时 PostgreSQL 容器执行 Control 全量 Go 测试、静态检查与 Hub 构建。脚本只操作自己创建的临时容器和 `control_test` 数据库。
