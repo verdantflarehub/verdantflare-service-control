@@ -59,19 +59,30 @@ func (s *Service) listGuests(ctx context.Context, cursor, query string, limit in
 	if limit < 1 || limit > 100 || len(query) > 160 || len(cursor) > 128 {
 		return GuestPage{}, domain.NewError(400, "guest_query_invalid", "游客查询参数无效")
 	}
-	page, err := s.loginDirectory.ListUsers(ctx, cursor, strings.TrimSpace(query), limit)
-	if err != nil {
-		return GuestPage{}, domain.NewError(503, "login_directory_unavailable", "Login 用户目录暂时不可用")
-	}
 	bound, err := s.repository.BoundLoginSubjects(ctx)
 	if err != nil {
 		return GuestPage{}, err
 	}
-	result := GuestPage{Users: make([]gateway.LoginDirectoryUser, 0, len(page.Users)), NextCursor: page.NextCursor}
-	for _, user := range page.Users {
-		if user.ID != "" && user.EmailVerified && user.Status == "active" && !bound[user.ID] {
-			result.Users = append(result.Users, user)
+	result := GuestPage{Users: make([]gateway.LoginDirectoryUser, 0, limit)}
+	next := cursor
+	for len(result.Users) < limit {
+		page, err := s.loginDirectory.ListUsers(ctx, next, strings.TrimSpace(query), limit-len(result.Users))
+		if err != nil {
+			return GuestPage{}, domain.NewError(503, "login_directory_unavailable", "Login 用户目录暂时不可用")
 		}
+		for _, user := range page.Users {
+			if user.ID != "" && user.EmailVerified && user.Status == "active" && !bound[user.ID] {
+				result.Users = append(result.Users, user)
+			}
+		}
+		result.NextCursor = page.NextCursor
+		if page.NextCursor == "" {
+			break
+		}
+		if page.NextCursor == next {
+			return GuestPage{}, domain.NewError(503, "login_directory_unavailable", "Login 用户目录分页异常")
+		}
+		next = page.NextCursor
 	}
 	return result, nil
 }

@@ -152,6 +152,38 @@ func TestListedAppAppearsInHubWithoutVersionOrInstallEntitlement(t *testing.T) {
 	if len(catalog.Apps) != 0 {
 		t.Fatalf("Hub-only listing leaked into WWW catalog: %+v", catalog.Apps)
 	}
+	guest := request(t, server, http.MethodGet, "/api/control/guest/catalog", nil)
+	if guest.StatusCode != http.StatusOK {
+		t.Fatalf("guest catalog: %d %s", guest.StatusCode, readBody(t, guest))
+	}
+	var guestCatalog domain.GuestCatalog
+	decode(t, guest, &guestCatalog)
+	guest.Body.Close()
+	if len(guestCatalog.Apps) != 1 || guestCatalog.Apps[0].ID != "blender-mcp" || guestCatalog.Apps[0].Channel != "Listed" || len(guestCatalog.Apps[0].Showcase.Screenshots) != 1 {
+		t.Fatalf("guest catalog omitted listed editorial content: %+v", guestCatalog.Apps)
+	}
+	guestSession := httptest.NewServer(httpapi.New(config.Config{Environment: "test", TrustAuthHeaders: true}, service, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	defer guestSession.Close()
+	guestRequest, err := http.NewRequest(http.MethodGet, guestSession.URL+"/api/control/guest/catalog", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guestRequest.Header.Set("X-VF-Login-Subject", "unbound-login-user")
+	guestResponse, err := http.DefaultClient.Do(guestRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if guestResponse.StatusCode != http.StatusOK {
+		t.Fatalf("unbound Login subject cannot browse guest catalog: %d %s", guestResponse.StatusCode, readBody(t, guestResponse))
+	}
+	guestResponse.Body.Close()
+	unauthenticated := httptest.NewServer(httpapi.New(config.Config{Environment: "test"}, service, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	defer unauthenticated.Close()
+	denied := request(t, unauthenticated, http.MethodGet, "/api/control/guest/catalog", nil)
+	if denied.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated guest catalog status = %d, want 401", denied.StatusCode)
+	}
+	denied.Body.Close()
 
 	invalid := request(t, server, http.MethodPatch, "/api/control/ops/apps/blender-mcp", map[string]any{
 		"name": "Blender MCP", "category": "三维创作", "summary": "Blender 场景与动画工具", "channel": "Listed", "version": "0.1.0",

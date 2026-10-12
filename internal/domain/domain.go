@@ -113,6 +113,26 @@ type PublicCatalog struct {
 	Apps   []PublicApp   `json:"apps"`
 }
 
+// GuestCatalog exposes editorial Hub directory facts to authenticated users
+// who have not yet joined an organization. It carries no entitlement state.
+type GuestCatalog struct {
+	Models []PublicModel `json:"models"`
+	Apps   []GuestApp    `json:"apps"`
+}
+
+type GuestApp struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Category    string      `json:"category"`
+	Summary     string      `json:"summary"`
+	Version     string      `json:"version,omitempty"`
+	Channel     string      `json:"channel"`
+	Developer   string      `json:"developer,omitempty"`
+	Description string      `json:"description,omitempty"`
+	IconURL     string      `json:"iconUrl,omitempty"`
+	Showcase    AppShowcase `json:"showcase"`
+}
+
 type ModelProviderIcon struct {
 	SHA256      string `json:"sha256"`
 	ContentType string `json:"-"`

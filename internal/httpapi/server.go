@@ -67,6 +67,7 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 
 	mux.HandleFunc("GET /api/control/ops/releases", server.listReleases)
 	mux.HandleFunc("GET /api/control/public/catalog", server.publicCatalog)
+	mux.HandleFunc("GET /api/control/guest/catalog", server.guestCatalog)
 	mux.HandleFunc("GET /api/control/public/model-icons/{digest}", server.publicModelProviderIcon)
 	mux.HandleFunc("GET /api/control/ops/models", server.listManagedModels)
 	mux.HandleFunc("POST /api/control/ops/model-icons", server.uploadModelProviderIcon)

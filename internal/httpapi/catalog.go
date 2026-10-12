@@ -63,6 +63,14 @@ func (s *Server) publicCatalog(w http.ResponseWriter, r *http.Request) {
 	s.respond(w, r, result, err, http.StatusOK)
 }
 
+func (s *Server) guestCatalog(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.subject(w, r); !ok {
+		return
+	}
+	result, err := s.service.GuestCatalog(r.Context())
+	s.respond(w, r, result, err, http.StatusOK)
+}
+
 func (s *Server) listManagedModels(w http.ResponseWriter, r *http.Request) {
 	subject, ok := s.subject(w, r)
 	if !ok {

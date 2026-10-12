@@ -16,6 +16,32 @@ type fakeDirectory struct {
 	fail  bool
 }
 
+type pagedDirectory struct {
+	pages map[string]gateway.LoginDirectoryPage
+}
+
+func (d pagedDirectory) ListUsers(_ context.Context, cursor, _ string, _ int) (gateway.LoginDirectoryPage, error) {
+	return d.pages[cursor], nil
+}
+func (d pagedDirectory) User(context.Context, string) (gateway.LoginDirectoryUser, error) {
+	return gateway.LoginDirectoryUser{}, errors.New("unused")
+}
+
+func TestGuestListSkipsBoundPagesBeforeReportingEmpty(t *testing.T) {
+	ctx := context.Background()
+	repository := store.NewMemoryBootstrap()
+	directory := pagedDirectory{pages: map[string]gateway.LoginDirectoryPage{
+		"":     {Users: []gateway.LoginDirectoryUser{{ID: "00000000-0000-4000-8000-000000000001", Email: "admin@example.test", Status: "active", EmailVerified: true}}, NextCursor: "next"},
+		"next": {Users: []gateway.LoginDirectoryUser{{ID: "waiting-user", Email: "waiting@example.test", Status: "active", EmailVerified: true}}},
+	}}
+	service := NewService(repository)
+	service.SetLoginDirectory(directory)
+	page, err := service.ListGuests(ctx, "00000000-0000-4000-8000-000000000001", "", "", 10)
+	if err != nil || len(page.Users) != 1 || page.Users[0].ID != "waiting-user" || page.NextCursor != "" {
+		t.Fatalf("filtered first Login page must not appear empty: %+v, %v", page, err)
+	}
+}
+
 func TestOrganizationAdminSelectsUnboundUserAndTransfersOnlyBetweenManagedOrganizations(t *testing.T) {
 	ctx := context.Background()
 	repository := store.NewMemorySeeded(time.Now().UTC())

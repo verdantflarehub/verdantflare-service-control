@@ -98,6 +98,31 @@ func (s *Service) PublicCatalog(ctx context.Context) (domain.PublicCatalog, erro
 	return catalog, nil
 }
 
+func (s *Service) GuestCatalog(ctx context.Context) (domain.GuestCatalog, error) {
+	public, err := s.PublicCatalog(ctx)
+	if err != nil {
+		return domain.GuestCatalog{}, err
+	}
+	// An empty organization has no entitlements. ListApps applies the existing
+	// Listed/public publication gate; project only editorial fields below.
+	listed, err := s.repository.ListApps(ctx, "")
+	if err != nil {
+		return domain.GuestCatalog{}, err
+	}
+	result := domain.GuestCatalog{Models: public.Models, Apps: make([]domain.GuestApp, 0, len(listed))}
+	for _, app := range listed {
+		if app.Channel != "Listed" && !app.PublicVisible {
+			continue
+		}
+		result.Apps = append(result.Apps, domain.GuestApp{
+			ID: app.ID, Name: app.Name, Category: app.Category, Summary: app.Summary,
+			Version: app.Version, Channel: app.Channel, Developer: app.Developer,
+			Description: app.Description, IconURL: app.PublicIconURL, Showcase: app.Showcase,
+		})
+	}
+	return result, nil
+}
+
 func (s *Service) gatewayModels(ctx context.Context) (map[string]struct{}, error) {
 	if s.modelGateway == nil {
 		return nil, domain.NewError(503, "model_gateway_unconfigured", "模型网关目录尚未配置")
