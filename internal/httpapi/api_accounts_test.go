@@ -122,16 +122,37 @@ func TestAPIKeyCreditAndReadOnlyProbeHTTPFlow(t *testing.T) {
 	published.Body.Close()
 
 	creditPath := "/api/control/ops/organizations/org_verdantflare/api-credit"
-	grant := map[string]any{"requestId": "credit_test_request_001", "amountCents": 123}
+	for _, invalid := range []map[string]any{
+		{"requestId": "credit_test_invalid_001", "amountCents": 123},
+		{"requestId": "credit_test_invalid_002", "amountFen": 1},
+		{"requestId": "credit_test_invalid_003", "amountFen": 730001},
+	} {
+		response := request(t, server, http.MethodPost, creditPath, invalid)
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("invalid CNY grant accepted: %d %s", response.StatusCode, readBody(t, response))
+		}
+		response.Body.Close()
+	}
+	grant := map[string]any{"requestId": "credit_test_request_001", "amountFen": 898}
+	quoteResponse := request(t, server, http.MethodGet, creditPath+"/quote?amountFen=898", nil)
+	if quoteResponse.StatusCode != http.StatusOK {
+		t.Fatalf("quote: %d %s", quoteResponse.StatusCode, readBody(t, quoteResponse))
+	}
+	var quote control.APICreditQuote
+	decode(t, quoteResponse, &quote)
+	quoteResponse.Body.Close()
+	if quote.Currency != "CNY" || quote.RequestedFen != 898 || quote.CreditedYuan != "8.979" {
+		t.Fatalf("wrong CNY quote: %+v", quote)
+	}
 	for _, want := range []int{http.StatusOK, http.StatusOK} {
 		response := request(t, server, http.MethodPost, creditPath, grant)
 		if response.StatusCode != want {
 			t.Fatalf("grant: %d %s", response.StatusCode, readBody(t, response))
 		}
-		var balance gateway.CenterBalance
+		var balance control.APICreditBalance
 		decode(t, response, &balance)
 		response.Body.Close()
-		if balance.RemainingQuota != 615000 {
+		if balance.Currency != "CNY" || balance.RemainingQuota != 615000 || balance.RemainingYuan != "8.979" {
 			t.Fatalf("grant was not retry-safe: %+v", balance)
 		}
 	}
@@ -142,7 +163,7 @@ func TestAPIKeyCreditAndReadOnlyProbeHTTPFlow(t *testing.T) {
 	var billing domain.BillingView
 	decode(t, billingResponse, &billing)
 	billingResponse.Body.Close()
-	if billing.Usage.BudgetQuota != 615000 || billing.Usage.RemainingQuota != 615000 || billing.Usage.UsedQuota != 0 || len(billing.CreditGrants) != 1 || billing.CreditGrants[0].AmountCents != 123 {
+	if billing.Usage.BudgetQuota != 615000 || billing.Usage.RemainingQuota != 615000 || billing.Usage.UsedQuota != 0 || billing.Usage.BudgetYuan != "8.979" || len(billing.CreditGrants) != 1 || billing.CreditGrants[0].AmountYuan != "8.979" {
 		t.Fatalf("billing must use gateway balance and one idempotent grant: %+v", billing)
 	}
 	accounts.creditErr = gateway.CenterHTTPError{Status: http.StatusInternalServerError}
@@ -171,10 +192,10 @@ func TestAPIKeyCreditAndReadOnlyProbeHTTPFlow(t *testing.T) {
 		t.Fatalf("unexpected key list: %+v", keys)
 	}
 	probe := request(t, server, http.MethodGet, keyPath+"/"+secret.ID+"/probe", nil)
-	var result gateway.CenterProbe
+	var result control.APIKeyProbe
 	decode(t, probe, &result)
 	probe.Body.Close()
-	if !result.OK || !result.ReadOnly || fProbeCount(accounts) != 1 {
+	if !result.OK || !result.ReadOnly || result.Currency != "CNY" || result.RemainingYuan != "8.979" || fProbeCount(accounts) != 1 {
 		t.Fatalf("probe: %+v", result)
 	}
 	revoked := request(t, server, http.MethodDelete, keyPath+"/"+secret.ID, nil)
@@ -198,6 +219,11 @@ func TestAPIKeyCreditAndReadOnlyProbeHTTPFlow(t *testing.T) {
 	if accounts.balances["org_verdantflare"].Enabled {
 		t.Fatal("freeze did not disable gateway account")
 	}
+	frozenQuote := request(t, server, http.MethodGet, creditPath+"/quote?amountFen=730", nil)
+	if frozenQuote.StatusCode != http.StatusForbidden {
+		t.Fatalf("frozen organization got grant quote: %d %s", frozenQuote.StatusCode, readBody(t, frozenQuote))
+	}
+	frozenQuote.Body.Close()
 	blocked := request(t, server, http.MethodPost, keyPath, map[string]any{"name": "Blocked", "scopes": []string{"deepseek-flash"}, "expiresInDays": 30, "requestId": "key_test_request_002"})
 	if blocked.StatusCode != http.StatusForbidden {
 		t.Fatalf("frozen org key creation = %d", blocked.StatusCode)
@@ -235,11 +261,16 @@ func TestAPICreditRoleAndGatewayKeyOrganizationIsolation(t *testing.T) {
 		t.Fatalf("switch: %d", switchResponse.StatusCode)
 	}
 	switchResponse.Body.Close()
-	credit := request(t, server, http.MethodPost, "/api/control/ops/organizations/org_northshore/api-credit", map[string]any{"requestId": "credit_test_request_002", "amountCents": 100})
+	credit := request(t, server, http.MethodPost, "/api/control/ops/organizations/org_northshore/api-credit", map[string]any{"requestId": "credit_test_request_002", "amountFen": 730})
 	if credit.StatusCode != http.StatusForbidden {
 		t.Fatalf("non-CS admin grant = %d", credit.StatusCode)
 	}
 	credit.Body.Close()
+	quote := request(t, server, http.MethodGet, "/api/control/ops/organizations/org_northshore/api-credit/quote?amountFen=730", nil)
+	if quote.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-CS admin grant quote = %d", quote.StatusCode)
+	}
+	quote.Body.Close()
 	listed := request(t, server, http.MethodGet, "/api/control/api-keys", nil)
 	var keys []domain.APIKey
 	decode(t, listed, &keys)

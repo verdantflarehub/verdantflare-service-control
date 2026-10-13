@@ -189,6 +189,7 @@ type ModelExperienceRun struct {
 	OutputTokens   int        `json:"outputTokens,omitempty"`
 	TotalTokens    int        `json:"totalTokens,omitempty"`
 	BilledQuota    *int       `json:"billedQuota,omitempty"`
+	BilledYuan     string     `json:"billedYuan,omitempty"`
 	CreatedAt      time.Time  `json:"createdAt"`
 	CompletedAt    *time.Time `json:"completedAt,omitempty"`
 	ExpiresAt      time.Time  `json:"expiresAt"`
@@ -265,9 +266,10 @@ type BillingView struct {
 }
 
 type CreditGrant struct {
-	ID          string    `json:"id"`
-	AmountCents int       `json:"amountCents"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID         string    `json:"id"`
+	Currency   string    `json:"currency"`
+	AmountYuan string    `json:"amountYuan"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 type Invoice struct {
@@ -378,9 +380,11 @@ type UsageSummary struct {
 	BudgetQuota    int            `json:"budgetQuota"`
 	UsedQuota      int            `json:"usedQuota"`
 	RemainingQuota int            `json:"remainingQuota"`
-	Budget         float64        `json:"budget"`
-	Used           float64        `json:"used"`
-	Remaining      float64        `json:"remaining"`
+	Currency       string         `json:"currency"`
+	ExchangeRate   string         `json:"exchangeRateCnyPerUsd"`
+	BudgetYuan     string         `json:"budgetYuan"`
+	UsedYuan       string         `json:"usedYuan"`
+	RemainingYuan  string         `json:"remainingYuan"`
 	Enabled        bool           `json:"enabled"`
 	Percentage     float64        `json:"percentage"`
 	ByModel        map[string]int `json:"byModel"`

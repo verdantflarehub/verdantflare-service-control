@@ -26,7 +26,11 @@ func (s *Service) ListModelExperienceRuns(ctx context.Context, subject string) (
 	if err != nil {
 		return nil, err
 	}
-	return s.repository.ListModelExperienceRuns(ctx, organization.OrganizationID, userID)
+	runs, err := s.repository.ListModelExperienceRuns(ctx, organization.OrganizationID, userID)
+	for index := range runs {
+		runs[index] = modelRunWithCNY(runs[index])
+	}
+	return runs, err
 }
 
 func (s *Service) GetModelExperienceRun(ctx context.Context, subject, runID string) (domain.ModelExperienceRun, error) {
@@ -34,7 +38,15 @@ func (s *Service) GetModelExperienceRun(ctx context.Context, subject, runID stri
 	if err != nil {
 		return domain.ModelExperienceRun{}, err
 	}
-	return s.repository.GetModelExperienceRun(ctx, organization.OrganizationID, userID, runID)
+	run, err := s.repository.GetModelExperienceRun(ctx, organization.OrganizationID, userID, runID)
+	return modelRunWithCNY(run), err
+}
+
+func modelRunWithCNY(run domain.ModelExperienceRun) domain.ModelExperienceRun {
+	if run.BilledQuota != nil {
+		run.BilledYuan = quotaYuan(int64(*run.BilledQuota))
+	}
+	return run
 }
 
 func (s *Service) CreateModelExperienceRun(ctx context.Context, subject string, input CreateModelExperienceInput) (domain.ModelExperienceRun, error) {
@@ -56,7 +68,7 @@ func (s *Service) CreateModelExperienceRun(ctx context.Context, subject string, 
 	}
 	if found {
 		if existing.CenterUserID == userID && existing.ModelID == input.ModelID && existing.KeyID == input.KeyID && existing.Prompt == input.Prompt {
-			return existing, nil
+			return modelRunWithCNY(existing), nil
 		}
 		return domain.ModelExperienceRun{}, domain.NewError(409, "experience_request_conflict", "请求 ID 已用于其他体验任务")
 	}

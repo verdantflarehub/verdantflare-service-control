@@ -89,6 +89,7 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("GET /api/control/ops/organizations/{organizationID}", server.getManagedOrganization)
 	mux.HandleFunc("PATCH /api/control/ops/organizations/{organizationID}", server.updateManagedOrganization)
 	mux.HandleFunc("GET /api/control/ops/organizations/{organizationID}/api-credit", server.getOrganizationAPICredit)
+	mux.HandleFunc("GET /api/control/ops/organizations/{organizationID}/api-credit/quote", server.quoteOrganizationAPICredit)
 	mux.HandleFunc("POST /api/control/ops/organizations/{organizationID}/api-credit", server.grantOrganizationAPICredit)
 	mux.HandleFunc("POST /api/control/ops/organizations/{organizationID}/members", server.createManagedMember)
 	mux.HandleFunc("GET /api/control/ops/guests", server.listGuests)

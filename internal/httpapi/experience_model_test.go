@@ -95,7 +95,7 @@ func TestModelExperienceHTTPFlow(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if run.Status != "completed" || run.Response != "真实上游响应" || run.TotalTokens != 20 || run.BilledQuota == nil || *run.BilledQuota != 362 {
+	if run.Status != "completed" || run.Response != "真实上游响应" || run.TotalTokens != 20 || run.BilledQuota == nil || *run.BilledQuota != 362 || run.BilledYuan != "0.005285" {
 		t.Fatalf("run did not persist a real gateway result: %+v", run)
 	}
 	if accounts.chatModel.Load() != "deepseek-flash" || accounts.chatKey.Load() != 7 {

@@ -412,17 +412,7 @@ func (m *Memory) ListAPITasks(_ context.Context, organizationID string) ([]domai
 }
 
 func (m *Memory) Usage(_ context.Context, organizationID string) (domain.UsageSummary, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	billing, ok := m.billing[organizationID]
-	if !ok {
-		return domain.UsageSummary{}, domain.NewError(404, "usage_not_found", "暂无用量数据")
-	}
-	percentage := 0.0
-	if billing.APIBudget > 0 {
-		percentage = float64(billing.APIUsed) / float64(billing.APIBudget) * 100
-	}
-	return domain.UsageSummary{Budget: float64(billing.APIBudget), Used: float64(billing.APIUsed), Remaining: float64(billing.APIBudget - billing.APIUsed), Percentage: percentage, ByModel: map[string]int{}}, nil
+	return domain.UsageSummary{}, domain.NewError(503, "legacy_usage_unavailable", "旧版用量摘要不可用，请读取模型网关实时额度")
 }
 
 func (m *Memory) ListMembers(_ context.Context, organizationID string) ([]domain.Member, error) {

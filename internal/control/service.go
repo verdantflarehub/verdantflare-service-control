@@ -327,15 +327,15 @@ func (s *Service) Usage(ctx context.Context, subject string) (domain.UsageSummar
 
 func usageFromGatewayBalance(balance gateway.CenterBalance) domain.UsageSummary {
 	budgetQuota := balance.RemainingQuota + balance.UsedQuota
-	budget := float64(budgetQuota) / 500000
-	used := float64(balance.UsedQuota) / 500000
-	remaining := float64(balance.RemainingQuota) / 500000
 	percentage := 0.0
-	if budget > 0 {
-		percentage = used / budget * 100
+	if budgetQuota > 0 {
+		percentage = float64(balance.UsedQuota) / float64(budgetQuota) * 100
 	}
 	return domain.UsageSummary{BudgetQuota: budgetQuota, UsedQuota: balance.UsedQuota, RemainingQuota: balance.RemainingQuota,
-		Budget: budget, Used: used, Remaining: remaining, Enabled: balance.Enabled, Percentage: percentage, ByModel: map[string]int{}}
+		Currency: "CNY", ExchangeRate: cnyPerUSD,
+		BudgetYuan: quotaYuan(int64(balance.RemainingQuota) + int64(balance.UsedQuota)),
+		UsedYuan:   quotaYuan(int64(balance.UsedQuota)), RemainingYuan: quotaYuan(int64(balance.RemainingQuota)),
+		Enabled: balance.Enabled, Percentage: percentage, ByModel: map[string]int{}}
 }
 
 func (s *Service) Organization(ctx context.Context, subject string) (domain.Organization, error) {
@@ -403,7 +403,7 @@ func (s *Service) Billing(ctx context.Context, subject string) (domain.BillingVi
 	}
 	creditGrants := make([]domain.CreditGrant, 0, len(grants))
 	for _, grant := range grants {
-		creditGrants = append(creditGrants, domain.CreditGrant{ID: grant.ID, AmountCents: grant.AmountCents, CreatedAt: grant.CreatedAt})
+		creditGrants = append(creditGrants, domain.CreditGrant{ID: grant.ID, Currency: "CNY", AmountYuan: quotaYuan(int64(grant.AmountCents) * 5000), CreatedAt: grant.CreatedAt})
 	}
 	return domain.BillingView{Plan: organization.Plan, Usage: usageFromGatewayBalance(balance), CreditGrants: creditGrants}, nil
 }

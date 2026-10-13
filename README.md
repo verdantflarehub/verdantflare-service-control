@@ -71,7 +71,8 @@ CONTROL_TRUST_AUTH_HEADERS=true
 | GET/POST | `/api/control/api-keys` | 当前组织网关 Key 与历史记录列表；组织管理员创建限定模型 Key |
 | DELETE | `/api/control/api-keys/{id}` | 撤销 API Key |
 | GET | `/api/control/api-keys/{id}/probe` | 只读验证 Key、余额与可见模型 |
-| GET/POST | `/api/control/ops/organizations/{id}/api-credit` | 客户成功管理员查询／追加美元额度 |
+| GET/POST | `/api/control/ops/organizations/{id}/api-credit` | 客户成功管理员查询人民币额度／以整数人民币分追加额度；仅与 new-api 交互时换算美元美分 |
+| GET | `/api/control/ops/organizations/{id}/api-credit/quote?amountFen={整数}` | 只读预览实际到账人民币等值，不发放额度 |
 | GET | `/api/control/api/models` | 当前已上架且在专用网关 Token 的模型列表中可见的目录；不授予客户调用权限 |
 | GET | `/api/control/api/tasks` | API 任务摘要 |
 | GET | `/api/control/api/usage` | API 用量摘要 |
