@@ -114,3 +114,50 @@ func TestSurveyHTTPGuestFlowAndAuthentication(t *testing.T) {
 		t.Fatal("private repository state leaked")
 	}
 }
+
+func TestSurveyCatalogHTTPAndNewRouteIsolation(t *testing.T) {
+	repo := store.NewMemoryBootstrap()
+	server := httpapi.New(config.Config{Environment: "production", TrustAuthHeaders: true}, control.NewService(repo), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	const admin = "00000000-0000-4000-8000-000000000001"
+	do := func(method, path, body, subject string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "https://hub.example.test"+path, strings.NewReader(body))
+		if subject != "" {
+			req.Header.Set("X-VF-Login-Subject", subject)
+		}
+		if body != "" {
+			req.Header.Set("Origin", "https://hub.example.test")
+			req.Header.Set("Content-Type", "application/json")
+		}
+		w := httptest.NewRecorder()
+		server.ServeHTTP(w, req)
+		return w
+	}
+	const catalog = "/api/control/ops/surveys"
+	if w := do("GET", catalog, "", ""); w.Code != 401 {
+		t.Fatalf("anonymous catalog: %d", w.Code)
+	}
+	if w := do("POST", catalog, `{"name":"测试问卷","requestId":"123e4567-e89b-42d3-a456-426614174000"}`, "unknown"); w.Code != 403 {
+		t.Fatalf("other org creates: %d", w.Code)
+	}
+	w := do("POST", catalog, `{"name":"测试问卷","description":"需求反馈","requestId":"123e4567-e89b-42d3-a456-426614174000"}`, admin)
+	if w.Code != 201 {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var created domain.SurveyMetadata
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	base := "/api/control/public/surveys/" + created.ID
+	if w = do("GET", base+"/metadata", "", ""); w.Code != 200 || !strings.Contains(w.Body.String(), "测试问卷") || strings.Contains(w.Body.String(), admin) {
+		t.Fatalf("public metadata: %d %s", w.Code, w.Body.String())
+	}
+	if w = do("GET", base, "", ""); w.Code != 423 {
+		t.Fatalf("new survey must be closed: %d", w.Code)
+	}
+	if w = do("GET", "/api/control/public/surveys/survey-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/metadata", "", ""); w.Code != 404 {
+		t.Fatalf("unknown survey: %d", w.Code)
+	}
+	if w = do("GET", catalog, "", admin); w.Code != 200 || !strings.Contains(w.Body.String(), "云南交流") || !strings.Contains(w.Body.String(), "测试问卷") {
+		t.Fatalf("catalog: %d %s", w.Code, w.Body.String())
+	}
+}

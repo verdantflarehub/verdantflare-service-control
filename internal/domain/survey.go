@@ -50,11 +50,20 @@ type SurveyRate struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 type SurveyState struct {
+	Metadata   *SurveyMetadata            `json:"metadata,omitempty"`
 	Settings   SurveySettings             `json:"settings"`
 	Challenges map[string]SurveyChallenge `json:"challenges"`
 	Guests     map[string]SurveyGuest     `json:"guests"`
 	Rates      map[string]SurveyRate      `json:"rates"`
 	Responses  map[string]SurveyResponse  `json:"responses"`
+}
+
+type SurveyMetadata struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"createdAt"`
+	CreatedBy   string    `json:"createdBy,omitempty"`
 }
 
 type SurveySettings struct {

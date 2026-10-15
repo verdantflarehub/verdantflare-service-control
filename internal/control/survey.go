@@ -13,6 +13,7 @@ import (
 	"image/draw"
 	"image/png"
 	"math/big"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -38,6 +39,90 @@ func (s *Service) surveyRepository() (store.SurveyRepository, error) {
 		return nil, domain.NewError(503, "survey_unavailable", "问卷暂时不可用")
 	}
 	return repo, nil
+}
+
+var surveyRequestID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+func (s *Service) requireSurveyAdmin(ctx context.Context, subject string) error {
+	org, roles, _, err := s.activeOrganization(ctx, subject)
+	if err != nil {
+		return err
+	}
+	if org.OrganizationID != "org_verdantflare" || !hasAnyRole(roles, "customer_success_admin") {
+		return domain.NewError(403, "survey_forbidden", "仅 VF 内部客户成功管理员可管理问卷")
+	}
+	return nil
+}
+func surveyMeta(id string, state domain.SurveyState) domain.SurveyMetadata {
+	if state.Metadata != nil {
+		return *state.Metadata
+	}
+	return domain.SurveyMetadata{ID: id, Name: "云南交流", Description: "需求反馈"}
+}
+
+type SurveyCatalogItem struct {
+	domain.SurveyMetadata
+	Open  bool `json:"open"`
+	Total int  `json:"total"`
+}
+
+func (s *Service) ListSurveys(ctx context.Context, subject string) ([]SurveyCatalogItem, error) {
+	if err := s.requireSurveyAdmin(ctx, subject); err != nil {
+		return nil, err
+	}
+	repo, err := s.surveyRepository()
+	if err != nil {
+		return nil, err
+	}
+	states, err := repo.ListSurveys(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]SurveyCatalogItem, 0, len(states))
+	for _, state := range states {
+		result = append(result, SurveyCatalogItem{SurveyMetadata: *state.Metadata, Open: state.Settings.Open, Total: len(state.Responses)})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].CreatedAt.Equal(result[j].CreatedAt) {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].CreatedAt.After(result[j].CreatedAt)
+	})
+	return result, nil
+}
+func (s *Service) CreateSurvey(ctx context.Context, subject, name, description, requestID string) (domain.SurveyMetadata, error) {
+	if err := s.requireSurveyAdmin(ctx, subject); err != nil {
+		return domain.SurveyMetadata{}, err
+	}
+	name, description = strings.TrimSpace(name), strings.TrimSpace(description)
+	if n := utf8.RuneCountInString(name); n < 2 || n > 80 {
+		return domain.SurveyMetadata{}, domain.NewError(400, "survey_name_invalid", "问卷名称需要 2—80 个字符")
+	}
+	if utf8.RuneCountInString(description) > 200 {
+		return domain.SurveyMetadata{}, domain.NewError(400, "survey_description_invalid", "说明最多 200 个字符")
+	}
+	if !surveyRequestID.MatchString(requestID) {
+		return domain.SurveyMetadata{}, domain.NewError(400, "survey_request_invalid", "创建请求标识无效")
+	}
+	repo, err := s.surveyRepository()
+	if err != nil {
+		return domain.SurveyMetadata{}, err
+	}
+	meta := domain.SurveyMetadata{ID: "survey-" + strings.ReplaceAll(requestID, "-", ""), Name: name, Description: description, CreatedAt: s.now(), CreatedBy: subject}
+	return repo.CreateSurvey(ctx, meta)
+}
+func (s *Service) SurveyMetadata(ctx context.Context) (domain.SurveyMetadata, error) {
+	repo, err := s.surveyRepository()
+	if err != nil {
+		return domain.SurveyMetadata{}, err
+	}
+	state, err := repo.ReadSurvey(ctx)
+	if err != nil {
+		return domain.SurveyMetadata{}, err
+	}
+	meta := surveyMeta(store.SurveyID(ctx), state)
+	meta.CreatedBy = ""
+	return meta, nil
 }
 func surveyCleanup(state *domain.SurveyState, now time.Time) {
 	for key, v := range state.Challenges {
@@ -246,7 +331,7 @@ func (s *Service) GetSurvey(ctx context.Context, token string) (SurveyPage, erro
 	}
 	guest, err := surveyGuest(state, token, s.now())
 	if err == nil && guest.ResponseID != "" {
-		return SurveyPage{domain.SurveyID, 1, guest.Nickname, guest.ResponseID, []domain.SurveyQuestion{}}, nil
+		return SurveyPage{store.SurveyID(ctx), 1, guest.Nickname, guest.ResponseID, []domain.SurveyQuestion{}}, nil
 	}
 	if closed := requireSurveyOpen(state); closed != nil {
 		return SurveyPage{}, closed
@@ -254,7 +339,7 @@ func (s *Service) GetSurvey(ctx context.Context, token string) (SurveyPage, erro
 	if err != nil {
 		return SurveyPage{}, err
 	}
-	return SurveyPage{domain.SurveyID, 1, guest.Nickname, guest.ResponseID, domain.SurveyQuestions()}, nil
+	return SurveyPage{store.SurveyID(ctx), 1, guest.Nickname, guest.ResponseID, domain.SurveyQuestions()}, nil
 }
 func validateSurvey(input domain.SurveySubmission) error {
 	invalid := func(message string) error { return domain.NewError(400, "survey_answers_invalid", message) }
@@ -350,12 +435,8 @@ func (s *Service) SubmitSurvey(ctx context.Context, token string, input domain.S
 }
 
 func (s *Service) surveyAdminState(ctx context.Context, subject string) (domain.SurveyState, error) {
-	org, roles, _, err := s.activeOrganization(ctx, subject)
-	if err != nil {
+	if err := s.requireSurveyAdmin(ctx, subject); err != nil {
 		return domain.SurveyState{}, err
-	}
-	if org.OrganizationID != "org_verdantflare" || !hasAnyRole(roles, "customer_success_admin") {
-		return domain.SurveyState{}, domain.NewError(403, "survey_forbidden", "仅 VF 内部客户成功管理员可查看问卷数据")
 	}
 	repo, err := s.surveyRepository()
 	if err != nil {
@@ -369,6 +450,7 @@ type SurveyDistribution struct {
 	Counts   map[string]int `json:"counts"`
 }
 type SurveyStats struct {
+	Metadata       domain.SurveyMetadata         `json:"metadata"`
 	Settings       domain.SurveySettings         `json:"settings"`
 	Total          int                           `json:"total"`
 	Daily          map[string]int                `json:"daily"`
@@ -383,7 +465,7 @@ func (s *Service) SurveyStatistics(ctx context.Context, subject string) (SurveyS
 	if err != nil {
 		return SurveyStats{}, err
 	}
-	result := SurveyStats{Total: len(state.Responses), Daily: map[string]int{}, Questions: domain.SurveyQuestions(), Distribution: map[string]SurveyDistribution{}}
+	result := SurveyStats{Metadata: surveyMeta(store.SurveyID(ctx), state), Total: len(state.Responses), Daily: map[string]int{}, Questions: domain.SurveyQuestions(), Distribution: map[string]SurveyDistribution{}}
 	result.Settings = state.Settings
 	for _, q := range result.Questions {
 		if len(q.Options) == 0 {

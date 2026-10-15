@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/hex"
 	"mime"
 	"net"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/verdantflarehub/verdantflare-service-control/internal/control"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
+	"github.com/verdantflarehub/verdantflare-service-control/internal/store"
 )
 
 const surveyCookie = "vf_survey_session"
@@ -41,11 +43,55 @@ func (s *Server) surveySettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) surveyRoute(w http.ResponseWriter, r *http.Request) bool {
-	if r.PathValue("surveyID") != domain.SurveyID {
+	id := r.PathValue("surveyID")
+	valid := id == domain.SurveyID
+	if len(id) == 39 && len(id) > 7 && id[:7] == "survey-" {
+		_, err := hex.DecodeString(id[7:])
+		valid = err == nil
+	}
+	if !valid {
 		s.writeError(w, r, domain.NewError(404, "survey_not_found", "未找到该问卷"))
 		return false
 	}
+	*r = *r.WithContext(store.WithSurveyID(r.Context(), id))
 	return true
+}
+func surveyCookieName(r *http.Request) string {
+	if r.PathValue("surveyID") == domain.SurveyID {
+		return surveyCookie
+	}
+	return surveyCookie + "_" + r.PathValue("surveyID")
+}
+func (s *Server) surveyMetadata(w http.ResponseWriter, r *http.Request) {
+	if !s.surveyRoute(w, r) {
+		return
+	}
+	result, err := s.service.SurveyMetadata(r.Context())
+	s.respond(w, r, result, err, 200)
+}
+func (s *Server) surveyList(w http.ResponseWriter, r *http.Request) {
+	subject, ok := s.subject(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.service.ListSurveys(r.Context(), subject)
+	s.respond(w, r, result, err, 200)
+}
+func (s *Server) surveyCreate(w http.ResponseWriter, r *http.Request) {
+	subject, ok := s.subject(w, r)
+	if !ok || !s.surveyWriteAllowed(w, r) {
+		return
+	}
+	var input struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		RequestID   string `json:"requestId"`
+	}
+	if !s.decode(w, r, &input) {
+		return
+	}
+	result, err := s.service.CreateSurvey(r.Context(), subject, input.Name, input.Description, input.RequestID)
+	s.respond(w, r, result, err, 201)
 }
 func (s *Server) surveyWriteAllowed(w http.ResponseWriter, r *http.Request) bool {
 	origin := r.Header.Get("Origin")
@@ -71,7 +117,7 @@ func (s *Server) surveySource(r *http.Request) string {
 	return r.RemoteAddr
 }
 func surveyToken(r *http.Request) string {
-	c, err := r.Cookie(surveyCookie)
+	c, err := r.Cookie(surveyCookieName(r))
 	if err != nil {
 		return ""
 	}
@@ -102,7 +148,11 @@ func (s *Server) surveySession(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: surveyCookie, Value: token, Path: "/api/control/public/surveys/", MaxAge: 7200, HttpOnly: true, Secure: s.config.Environment == "production", SameSite: http.SameSiteStrictMode})
+	cookiePath := "/api/control/public/surveys/"
+	if r.PathValue("surveyID") != domain.SurveyID {
+		cookiePath += r.PathValue("surveyID")
+	}
+	http.SetCookie(w, &http.Cookie{Name: surveyCookieName(r), Value: token, Path: cookiePath, MaxAge: 7200, HttpOnly: true, Secure: s.config.Environment == "production", SameSite: http.SameSiteStrictMode})
 	page, err := s.service.GetSurvey(r.Context(), token)
 	s.respond(w, r, page, err, 200)
 }

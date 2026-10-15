@@ -13,8 +13,8 @@ import (
 )
 
 type Memory struct {
-	mu     sync.RWMutex
-	survey domain.SurveyState
+	mu      sync.RWMutex
+	surveys map[string]domain.SurveyState
 
 	users         map[string]domain.CenterUser
 	organizations map[string]domain.Organization
@@ -41,6 +41,7 @@ func NewMemoryBootstrap() *Memory {
 	const organizationID = "org_verdantflare"
 	const adminSubject = "00000000-0000-4000-8000-000000000001"
 	return &Memory{
+		surveys: map[string]domain.SurveyState{domain.SurveyID: {}},
 		users: map[string]domain.CenterUser{
 			adminSubject: {
 				LoginSubject: adminSubject, CenterUserID: "cu_01HUB7C9Q", DisplayName: "管理员",
@@ -85,6 +86,7 @@ func NewMemorySeeded(now time.Time) *Memory {
 	}
 
 	return &Memory{
+		surveys: map[string]domain.SurveyState{domain.SurveyID: {}},
 		users: map[string]domain.CenterUser{
 			"00000000-0000-4000-8000-000000000001": {
 				CenterUserID: "cu_01HUB7C9Q", LoginSubject: "00000000-0000-4000-8000-000000000001", DisplayName: "默认管理员", Email: "admin@verdantflarehub.com", ActiveOrganizationID: verdantflare.OrganizationID,

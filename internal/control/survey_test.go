@@ -110,6 +110,49 @@ func TestSurveySwitchDefaultClosedAndRetainsResponses(t *testing.T) {
 	}
 }
 
+func TestSurveyCatalogCreatesClosedIsolatedQuestionnaire(t *testing.T) {
+	ctx := context.Background()
+	repo := store.NewMemoryBootstrap()
+	s := NewService(repo)
+	const admin = "00000000-0000-4000-8000-000000000001"
+	const requestID = "123e4567-e89b-42d3-a456-426614174000"
+	items, err := s.ListSurveys(ctx, admin)
+	if err != nil || len(items) != 1 || items[0].ID != domain.SurveyID || items[0].Name != "云南交流" || items[0].Open {
+		t.Fatalf("legacy survey must appear closed in catalog: %+v %v", items, err)
+	}
+	_, err = s.CreateSurvey(ctx, "unknown", "第二份问卷", "说明", requestID)
+	surveyStatus(t, err, 403)
+	created, err := s.CreateSurvey(ctx, admin, "第二份问卷", "说明", requestID)
+	if err != nil || created.ID != "survey-123e4567e89b42d3a456426614174000" {
+		t.Fatalf("create: %+v %v", created, err)
+	}
+	retried, err := s.CreateSurvey(ctx, admin, "第二份问卷", "说明", requestID)
+	if err != nil || retried.ID != created.ID {
+		t.Fatalf("retry must return same record: %+v %v", retried, err)
+	}
+	_, err = s.CreateSurvey(ctx, admin, "变更后的名称", "说明", requestID)
+	surveyStatus(t, err, 409)
+	newCtx := store.WithSurveyID(ctx, created.ID)
+	stats, err := s.SurveyStatistics(newCtx, admin)
+	if err != nil || stats.Metadata.Name != "第二份问卷" || stats.Total != 0 || stats.Settings.Open {
+		t.Fatalf("new survey is not isolated/closed: %+v %v", stats, err)
+	}
+	_, err = s.GetSurvey(newCtx, "")
+	surveyStatus(t, err, 423)
+	_, err = s.SetSurveySettings(newCtx, admin, true, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := s.SurveyStatistics(ctx, admin)
+	if err != nil || legacy.Settings.Open || legacy.Total != 0 {
+		t.Fatalf("legacy state changed: %+v %v", legacy, err)
+	}
+	items, err = s.ListSurveys(ctx, admin)
+	if err != nil || len(items) != 2 || items[0].ID != created.ID || !items[0].Open {
+		t.Fatalf("catalog mismatch: %+v %v", items, err)
+	}
+}
+
 func TestSurveySwitchConcurrentAdministrators(t *testing.T) {
 	s := NewService(store.NewMemoryBootstrap())
 	ctx := context.Background()
