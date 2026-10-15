@@ -1,0 +1,476 @@
+package control
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
+	"math/big"
+	"slices"
+	"sort"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
+	"github.com/verdantflarehub/verdantflare-service-control/internal/store"
+)
+
+func surveyHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+func surveyRandom() (string, error) {
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	return hex.EncodeToString(b), err
+}
+func (s *Service) surveyRepository() (store.SurveyRepository, error) {
+	repo, ok := s.repository.(store.SurveyRepository)
+	if !ok {
+		return nil, domain.NewError(503, "survey_unavailable", "问卷暂时不可用")
+	}
+	return repo, nil
+}
+func surveyCleanup(state *domain.SurveyState, now time.Time) {
+	for key, v := range state.Challenges {
+		if !now.Before(v.ExpiresAt) {
+			delete(state.Challenges, key)
+		}
+	}
+	for key, v := range state.Guests {
+		if !now.Before(v.ExpiresAt) {
+			delete(state.Guests, key)
+		}
+	}
+	for key, v := range state.Rates {
+		if !now.Before(v.ExpiresAt) {
+			delete(state.Rates, key)
+		}
+	}
+}
+func surveyRate(state *domain.SurveyState, source string, now time.Time) error {
+	surveyCleanup(state, now)
+	key := surveyHash(source)
+	rate := state.Rates[key]
+	if rate.Count >= 120 || len(state.Challenges) >= 2000 || len(state.Guests) >= 2000 || (rate.Count == 0 && len(state.Rates) >= 2000) {
+		return domain.NewError(429, "survey_rate_limited", "操作较频繁，请十分钟后再试")
+	}
+	if rate.Count == 0 {
+		rate.ExpiresAt = now.Add(10 * time.Minute)
+	}
+	rate.Count++
+	state.Rates[key] = rate
+	return nil
+}
+
+func requireSurveyOpen(state domain.SurveyState) error {
+	if !state.Settings.Open {
+		return domain.NewError(423, "survey_closed", "问卷暂未开放或已暂停，当前不能提交；页面内的答案会保留")
+	}
+	return nil
+}
+
+func (s *Service) SetSurveySettings(ctx context.Context, subject string, open bool, expectedVersion int) (domain.SurveySettings, error) {
+	if _, err := s.surveyAdminState(ctx, subject); err != nil {
+		return domain.SurveySettings{}, err
+	}
+	if expectedVersion < 0 {
+		return domain.SurveySettings{}, domain.NewError(400, "survey_settings_invalid", "设置版本无效")
+	}
+	repo, err := s.surveyRepository()
+	if err != nil {
+		return domain.SurveySettings{}, err
+	}
+	var result domain.SurveySettings
+	err = repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error {
+		if state.Settings.Version != expectedVersion {
+			return domain.NewError(409, "survey_settings_conflict", "开放状态已被修改，请刷新后再操作")
+		}
+		if state.Settings.Open != open {
+			now := s.now()
+			state.Settings = domain.SurveySettings{Open: open, Version: state.Settings.Version + 1, UpdatedAt: &now, UpdatedBy: subject}
+		}
+		result = state.Settings
+		return nil
+	})
+	return result, err
+}
+
+type SurveyCaptcha struct {
+	ChallengeID  string    `json:"challengeId"`
+	ImageDataURL string    `json:"imageDataUrl"`
+	ExpiresAt    time.Time `json:"expiresAt"`
+}
+
+func (s *Service) CreateSurveyCaptcha(ctx context.Context, source string) (SurveyCaptcha, error) {
+	repo, err := s.surveyRepository()
+	if err != nil {
+		return SurveyCaptcha{}, err
+	}
+	id, err := surveyRandom()
+	if err != nil {
+		return SurveyCaptcha{}, err
+	}
+	answer := make([]byte, 6)
+	for i := range answer {
+		n, e := rand.Int(rand.Reader, big.NewInt(10))
+		if e != nil {
+			return SurveyCaptcha{}, e
+		}
+		answer[i] = byte(n.Int64()) + '0'
+	}
+	picture, err := surveyCaptchaPNG(string(answer))
+	if err != nil {
+		return SurveyCaptcha{}, err
+	}
+	expires := s.now().Add(5 * time.Minute)
+	err = repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error {
+		if err := requireSurveyOpen(*state); err != nil {
+			return err
+		}
+		if err := surveyRate(state, source, s.now()); err != nil {
+			return err
+		}
+		state.Challenges[id] = domain.SurveyChallenge{AnswerHash: surveyHash(id + ":" + string(answer)), ExpiresAt: expires}
+		return nil
+	})
+	return SurveyCaptcha{id, "data:image/png;base64," + base64.StdEncoding.EncodeToString(picture), expires}, err
+}
+
+// Raster-only digits: the answer is never present in image metadata or API JSON.
+func surveyCaptchaPNG(answer string) ([]byte, error) {
+	img := image.NewRGBA(image.Rect(0, 0, 240, 70))
+	draw.Draw(img, img.Bounds(), image.NewUniform(color.RGBA{244, 241, 232, 255}), image.Point{}, draw.Src)
+	noise := make([]byte, 800)
+	if _, err := rand.Read(noise); err != nil {
+		return nil, err
+	}
+	for i := 0; i < 600; i += 2 {
+		img.Set(int(noise[i])%240, int(noise[i+1])%70, color.RGBA{130, 155, 140, 255})
+	}
+	segments := []byte{0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f}
+	positions := [][4]int{{3, 0, 21, 4}, {20, 3, 24, 23}, {20, 25, 24, 45}, {3, 44, 21, 48}, {0, 25, 4, 45}, {0, 3, 4, 23}, {3, 22, 21, 26}}
+	for i, digit := range []byte(answer) {
+		x, y := 12+i*38, 8+int(noise[600+i])%9
+		for j, p := range positions {
+			if segments[digit-'0']&(1<<j) != 0 {
+				draw.Draw(img, image.Rect(x+p[0], y+p[1], x+p[2], y+p[3]), image.NewUniform(color.RGBA{20, 55, 35, 255}), image.Point{}, draw.Src)
+			}
+		}
+	}
+	var out bytes.Buffer
+	err := png.Encode(&out, img)
+	return out.Bytes(), err
+}
+
+type SurveySessionInput struct {
+	Nickname    string `json:"nickname"`
+	ChallengeID string `json:"challengeId"`
+	Code        string `json:"code"`
+}
+
+func (s *Service) StartSurveySession(ctx context.Context, source string, input SurveySessionInput) (string, error) {
+	input.Nickname = strings.TrimSpace(input.Nickname)
+	if n := utf8.RuneCountInString(input.Nickname); n < 2 || n > 32 {
+		return "", domain.NewError(400, "survey_nickname_invalid", "昵称需要 2—32 个字符")
+	}
+	if len(input.ChallengeID) != 64 || len(input.Code) != 6 {
+		return "", domain.NewError(400, "survey_captcha_invalid", "请输入完整验证码，并在失效后换一张")
+	}
+	repo, err := s.surveyRepository()
+	if err != nil {
+		return "", err
+	}
+	token, err := surveyRandom()
+	if err != nil {
+		return "", err
+	}
+	var invalid error
+	err = repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error {
+		if err := requireSurveyOpen(*state); err != nil {
+			return err
+		}
+		if err := surveyRate(state, source, s.now()); err != nil {
+			return err
+		}
+		challenge, exists := state.Challenges[input.ChallengeID]
+		delete(state.Challenges, input.ChallengeID) // Wrong attempts also consume the challenge.
+		if !exists || !s.now().Before(challenge.ExpiresAt) || subtle.ConstantTimeCompare([]byte(challenge.AnswerHash), []byte(surveyHash(input.ChallengeID+":"+input.Code))) != 1 {
+			invalid = domain.NewError(400, "survey_captcha_invalid", "验证码错误或已过期，请换一张重试")
+			return nil
+		}
+		state.Guests[surveyHash(token)] = domain.SurveyGuest{Nickname: input.Nickname, ExpiresAt: s.now().Add(2 * time.Hour)}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if invalid != nil {
+		return "", invalid
+	}
+	return token, nil
+}
+
+func surveyGuest(state domain.SurveyState, token string, now time.Time) (domain.SurveyGuest, error) {
+	guest, ok := state.Guests[surveyHash(token)]
+	if !ok || len(token) != 64 || !now.Before(guest.ExpiresAt) {
+		return guest, domain.NewError(401, "survey_session_required", "填写会话已过期，请重新输入昵称和验证码；页面中的答案会保留")
+	}
+	return guest, nil
+}
+
+type SurveyPage struct {
+	ID         string                  `json:"id"`
+	Version    int                     `json:"version"`
+	Nickname   string                  `json:"nickname"`
+	ResponseID string                  `json:"responseId"`
+	Questions  []domain.SurveyQuestion `json:"questions"`
+}
+
+func (s *Service) GetSurvey(ctx context.Context, token string) (SurveyPage, error) {
+	repo, err := s.surveyRepository()
+	if err != nil {
+		return SurveyPage{}, err
+	}
+	state, err := repo.ReadSurvey(ctx)
+	if err != nil {
+		return SurveyPage{}, err
+	}
+	guest, err := surveyGuest(state, token, s.now())
+	if err == nil && guest.ResponseID != "" {
+		return SurveyPage{domain.SurveyID, 1, guest.Nickname, guest.ResponseID, []domain.SurveyQuestion{}}, nil
+	}
+	if closed := requireSurveyOpen(state); closed != nil {
+		return SurveyPage{}, closed
+	}
+	if err != nil {
+		return SurveyPage{}, err
+	}
+	return SurveyPage{domain.SurveyID, 1, guest.Nickname, guest.ResponseID, domain.SurveyQuestions()}, nil
+}
+func validateSurvey(input domain.SurveySubmission) error {
+	invalid := func(message string) error { return domain.NewError(400, "survey_answers_invalid", message) }
+	if input.Version != 1 {
+		return invalid("题目版本已变化，请刷新页面后重填")
+	}
+	if input.Analysis != "yes" {
+		return invalid("不同意内部需求分析时不保存本次答卷")
+	}
+	for _, value := range []string{input.Quote, input.ContactPermission} {
+		if value != "yes" && value != "no" {
+			return invalid("请分别选择三项使用许可")
+		}
+	}
+	if utf8.RuneCountInString(input.Contact) > 200 || (input.ContactPermission != "yes" && strings.TrimSpace(input.Contact) != "") {
+		return invalid("联系方式最多 200 字，且须同意会后联系")
+	}
+	questions := map[string]domain.SurveyQuestion{}
+	for _, q := range domain.SurveyQuestions() {
+		if q.ID != "q16" {
+			questions[q.ID] = q
+		}
+	}
+	for id, answer := range input.Answers {
+		q, ok := questions[id]
+		if !ok {
+			return invalid("含未知题目")
+		}
+		if utf8.RuneCountInString(answer.Text) > 2000 {
+			return invalid(id + " 补充说明最多 2000 字")
+		}
+		if len(answer.Rows) > len(q.Rows) || (len(q.Rows) > 0 && len(answer.Choices) > 0) {
+			return invalid(id + " 回答格式有误")
+		}
+		for row, value := range answer.Rows {
+			if !slices.Contains(q.Rows, row) || !slices.Contains(q.Options, value) {
+				return invalid(id + " 含未知行或选项")
+			}
+		}
+		seen := map[string]bool{}
+		for _, value := range answer.Choices {
+			if !slices.Contains(q.Options, value) || seen[value] {
+				return invalid(id + " 选项无效或重复")
+			}
+			seen[value] = true
+		}
+		if q.Max > 0 && len(answer.Choices) > q.Max {
+			return invalid(id + " 选择超过上限")
+		}
+		if id == "q12" && seen["暂无足够痛点"] && len(seen) > 1 {
+			return invalid("暂无足够痛点不能与其他优先项同时选择")
+		}
+	}
+	if len(input.Answers["q1"].Choices) == 0 {
+		return invalid("请选择您的角色")
+	}
+	return nil
+}
+func (s *Service) SubmitSurvey(ctx context.Context, token string, input domain.SurveySubmission) (string, error) {
+	repo, err := s.surveyRepository()
+	if err != nil {
+		return "", err
+	}
+	id, err := surveyRandom()
+	if err != nil {
+		return "", err
+	}
+	err = repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error {
+		guest, err := surveyGuest(*state, token, s.now())
+		if err != nil {
+			return err
+		}
+		if guest.ResponseID != "" {
+			id = guest.ResponseID
+			return nil
+		}
+		if err := requireSurveyOpen(*state); err != nil {
+			return err
+		}
+		if err := validateSurvey(input); err != nil {
+			return err
+		}
+		// Bound this small event survey's aggregate storage, including public abuse.
+		if len(state.Responses) >= 1000 {
+			return domain.NewError(503, "survey_capacity", "本次问卷收集已达上限，请联系组织方")
+		}
+		state.Responses[id] = domain.SurveyResponse{ID: id, Nickname: guest.Nickname, CreatedAt: s.now(), SurveySubmission: input}
+		guest.ResponseID = id
+		state.Guests[surveyHash(token)] = guest
+		return nil
+	})
+	return id, err
+}
+
+func (s *Service) surveyAdminState(ctx context.Context, subject string) (domain.SurveyState, error) {
+	org, roles, _, err := s.activeOrganization(ctx, subject)
+	if err != nil {
+		return domain.SurveyState{}, err
+	}
+	if org.OrganizationID != "org_verdantflare" || !hasAnyRole(roles, "customer_success_admin") {
+		return domain.SurveyState{}, domain.NewError(403, "survey_forbidden", "仅 VF 内部客户成功管理员可查看问卷数据")
+	}
+	repo, err := s.surveyRepository()
+	if err != nil {
+		return domain.SurveyState{}, err
+	}
+	return repo.ReadSurvey(ctx)
+}
+
+type SurveyDistribution struct {
+	Answered int            `json:"answered"`
+	Counts   map[string]int `json:"counts"`
+}
+type SurveyStats struct {
+	Settings       domain.SurveySettings         `json:"settings"`
+	Total          int                           `json:"total"`
+	Daily          map[string]int                `json:"daily"`
+	Questions      []domain.SurveyQuestion       `json:"questions"`
+	Distribution   map[string]SurveyDistribution `json:"distribution"`
+	ContactAllowed int                           `json:"contactAllowed"`
+	QuoteAllowed   int                           `json:"quoteAllowed"`
+}
+
+func (s *Service) SurveyStatistics(ctx context.Context, subject string) (SurveyStats, error) {
+	state, err := s.surveyAdminState(ctx, subject)
+	if err != nil {
+		return SurveyStats{}, err
+	}
+	result := SurveyStats{Total: len(state.Responses), Daily: map[string]int{}, Questions: domain.SurveyQuestions(), Distribution: map[string]SurveyDistribution{}}
+	result.Settings = state.Settings
+	for _, q := range result.Questions {
+		if len(q.Options) == 0 {
+			continue
+		}
+		keys := []string{q.ID}
+		if len(q.Rows) > 0 {
+			keys = nil
+			for _, row := range q.Rows {
+				keys = append(keys, q.ID+":"+row)
+			}
+		}
+		for _, key := range keys {
+			counts := map[string]int{}
+			for _, option := range q.Options {
+				counts[option] = 0
+			}
+			result.Distribution[key] = SurveyDistribution{Counts: counts}
+		}
+	}
+	for _, response := range state.Responses {
+		result.Daily[response.CreatedAt.In(time.FixedZone("CST", 8*3600)).Format("2006-01-02")]++
+		if response.ContactPermission == "yes" {
+			result.ContactAllowed++
+		}
+		if response.Quote == "yes" {
+			result.QuoteAllowed++
+		}
+		for id, answer := range response.Answers {
+			if len(answer.Choices) > 0 {
+				d := result.Distribution[id]
+				d.Answered++
+				for _, choice := range answer.Choices {
+					d.Counts[choice]++
+				}
+				result.Distribution[id] = d
+			}
+			for row, value := range answer.Rows {
+				key := id + ":" + row
+				d := result.Distribution[key]
+				d.Answered++
+				d.Counts[value]++
+				result.Distribution[key] = d
+			}
+		}
+	}
+	return result, nil
+}
+
+type SurveySummary struct {
+	ID        string    `json:"id"`
+	Nickname  string    `json:"nickname"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+type SurveyResponseList struct {
+	Total int             `json:"total"`
+	Items []SurveySummary `json:"items"`
+}
+
+func (s *Service) ListSurveyResponses(ctx context.Context, subject string, offset, limit int) (SurveyResponseList, error) {
+	state, err := s.surveyAdminState(ctx, subject)
+	if err != nil {
+		return SurveyResponseList{}, err
+	}
+	items := make([]SurveySummary, 0, len(state.Responses))
+	for _, r := range state.Responses {
+		items = append(items, SurveySummary{r.ID, r.Nickname, r.CreatedAt})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].ID < items[j].ID
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	total := len(items)
+	offset = max(0, min(offset, total))
+	limit = max(1, min(limit, 50))
+	return SurveyResponseList{total, items[offset:min(offset+limit, total)]}, nil
+}
+func (s *Service) GetSurveyResponse(ctx context.Context, subject, id string) (domain.SurveyResponse, error) {
+	state, err := s.surveyAdminState(ctx, subject)
+	if err != nil {
+		return domain.SurveyResponse{}, err
+	}
+	response, ok := state.Responses[id]
+	if !ok {
+		return response, domain.NewError(404, "survey_response_not_found", "未找到答卷")
+	}
+	return response, nil
+}

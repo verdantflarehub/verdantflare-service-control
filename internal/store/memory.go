@@ -13,7 +13,8 @@ import (
 )
 
 type Memory struct {
-	mu sync.RWMutex
+	mu     sync.RWMutex
+	survey domain.SurveyState
 
 	users         map[string]domain.CenterUser
 	organizations map[string]domain.Organization

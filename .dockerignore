@@ -3,4 +3,7 @@
 bin
 dist
 *.log
+.env*
+.tmp
+.output
 
