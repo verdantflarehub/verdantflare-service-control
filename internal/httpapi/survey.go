@@ -139,11 +139,11 @@ func (s *Server) surveySession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A successful session/receipt is reused so a lost response can be retried safely.
-	if page, err := s.service.GetSurvey(r.Context(), surveyToken(r)); err == nil {
+	if page, err := s.service.GetSurvey(r.Context(), surveyToken(r)); err == nil && input.RecoveryCode == "" && page.Nickname == input.Nickname {
 		writeJSON(w, 200, page)
 		return
 	}
-	token, err := s.service.StartSurveySession(r.Context(), s.surveySource(r), input)
+	credentials, err := s.service.StartSurveySession(r.Context(), s.surveySource(r), input)
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -152,9 +152,25 @@ func (s *Server) surveySession(w http.ResponseWriter, r *http.Request) {
 	if r.PathValue("surveyID") != domain.SurveyID {
 		cookiePath += r.PathValue("surveyID")
 	}
-	http.SetCookie(w, &http.Cookie{Name: surveyCookieName(r), Value: token, Path: cookiePath, MaxAge: 7200, HttpOnly: true, Secure: s.config.Environment == "production", SameSite: http.SameSiteStrictMode})
-	page, err := s.service.GetSurvey(r.Context(), token)
+	http.SetCookie(w, &http.Cookie{Name: surveyCookieName(r), Value: credentials.Token, Path: cookiePath, MaxAge: 7 * 24 * 3600, HttpOnly: true, Secure: s.config.Environment == "production", SameSite: http.SameSiteStrictMode})
+	page, err := s.service.GetSurvey(r.Context(), credentials.Token)
+	page.RecoveryCode = credentials.RecoveryCode
 	s.respond(w, r, page, err, 200)
+}
+func (s *Server) surveyDraft(w http.ResponseWriter, r *http.Request) {
+	if !s.surveyRoute(w, r) || !s.surveyWriteAllowed(w, r) {
+		return
+	}
+	var input struct {
+		domain.SurveySubmission
+		Step     int   `json:"step"`
+		Revision int64 `json:"revision"`
+	}
+	if !s.decode(w, r, &input) {
+		return
+	}
+	savedAt, err := s.service.SaveSurveyDraft(r.Context(), surveyToken(r), input.SurveySubmission, input.Step, input.Revision)
+	s.respond(w, r, map[string]any{"savedAt": savedAt}, err, 200)
 }
 func (s *Server) surveyPage(w http.ResponseWriter, r *http.Request) {
 	if !s.surveyRoute(w, r) {

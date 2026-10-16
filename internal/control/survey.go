@@ -22,6 +22,8 @@ import (
 
 	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/store"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 )
 
 func surveyHash(value string) string {
@@ -257,26 +259,49 @@ func surveyCaptchaPNG(answer string) ([]byte, error) {
 }
 
 type SurveySessionInput struct {
-	Nickname    string `json:"nickname"`
-	ChallengeID string `json:"challengeId"`
-	Code        string `json:"code"`
+	Nickname     string `json:"nickname"`
+	ChallengeID  string `json:"challengeId"`
+	Code         string `json:"code"`
+	SaveDraft    bool   `json:"saveDraft"`
+	RecoveryCode string `json:"recoveryCode,omitempty"`
 }
 
-func (s *Service) StartSurveySession(ctx context.Context, source string, input SurveySessionInput) (string, error) {
+type SurveySessionCredentials struct {
+	Token        string
+	RecoveryCode string
+}
+
+func surveyNicknameKey(value string) string {
+	return cases.Fold().String(norm.NFKC.String(strings.TrimSpace(value)))
+}
+
+func (s *Service) StartSurveySession(ctx context.Context, source string, input SurveySessionInput) (SurveySessionCredentials, error) {
 	input.Nickname = strings.TrimSpace(input.Nickname)
 	if n := utf8.RuneCountInString(input.Nickname); n < 2 || n > 32 {
-		return "", domain.NewError(400, "survey_nickname_invalid", "昵称需要 2—32 个字符")
+		return SurveySessionCredentials{}, domain.NewError(400, "survey_nickname_invalid", "昵称需要 2—32 个字符")
+	}
+	if !input.SaveDraft {
+		return SurveySessionCredentials{}, domain.NewError(400, "survey_draft_consent_required", "请确认临时保存草稿以便续填")
 	}
 	if len(input.ChallengeID) != 64 || len(input.Code) != 6 {
-		return "", domain.NewError(400, "survey_captcha_invalid", "请输入完整验证码，并在失效后换一张")
+		return SurveySessionCredentials{}, domain.NewError(400, "survey_captcha_invalid", "请输入完整验证码，并在失效后换一张")
 	}
 	repo, err := s.surveyRepository()
 	if err != nil {
-		return "", err
+		return SurveySessionCredentials{}, err
 	}
 	token, err := surveyRandom()
 	if err != nil {
-		return "", err
+		return SurveySessionCredentials{}, err
+	}
+	recoveryCode := ""
+	if input.RecoveryCode == "" {
+		recoveryCode, err = surveyRandom()
+		if err != nil {
+			return SurveySessionCredentials{}, err
+		}
+	} else if len(input.RecoveryCode) != 64 {
+		return SurveySessionCredentials{}, domain.NewError(400, "survey_recovery_invalid", "续填码无效或已过期")
 	}
 	var invalid error
 	err = repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error {
@@ -292,16 +317,43 @@ func (s *Service) StartSurveySession(ctx context.Context, source string, input S
 			invalid = domain.NewError(400, "survey_captcha_invalid", "验证码错误或已过期，请换一张重试")
 			return nil
 		}
-		state.Guests[surveyHash(token)] = domain.SurveyGuest{Nickname: input.Nickname, ExpiresAt: s.now().Add(2 * time.Hour)}
+		key := surveyNicknameKey(input.Nickname)
+		for _, response := range state.Responses {
+			if surveyNicknameKey(response.Nickname) == key {
+				invalid = domain.NewError(409, "survey_nickname_taken", "该昵称已被使用，请换一个昵称")
+				return nil
+			}
+		}
+		for oldToken, guest := range state.Guests {
+			if surveyNicknameKey(guest.Nickname) != key || !s.now().Before(guest.ExpiresAt) {
+				continue
+			}
+			if input.RecoveryCode == "" {
+				invalid = domain.NewError(409, "survey_nickname_taken", "该昵称已被使用；若是您本人，请输入续填码")
+				return nil
+			}
+			if subtle.ConstantTimeCompare([]byte(guest.RecoveryHash), []byte(surveyHash(input.RecoveryCode))) != 1 {
+				invalid = domain.NewError(400, "survey_recovery_invalid", "续填码无效或已过期")
+				return nil
+			}
+			delete(state.Guests, oldToken)
+			state.Guests[surveyHash(token)] = guest
+			return nil
+		}
+		if input.RecoveryCode != "" {
+			invalid = domain.NewError(400, "survey_recovery_invalid", "续填码无效或已过期")
+			return nil
+		}
+		state.Guests[surveyHash(token)] = domain.SurveyGuest{Nickname: input.Nickname, ExpiresAt: s.now().Add(7 * 24 * time.Hour), RecoveryHash: surveyHash(recoveryCode), DraftConsentAt: s.now()}
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return SurveySessionCredentials{}, err
 	}
 	if invalid != nil {
-		return "", invalid
+		return SurveySessionCredentials{}, invalid
 	}
-	return token, nil
+	return SurveySessionCredentials{Token: token, RecoveryCode: recoveryCode}, nil
 }
 
 func surveyGuest(state domain.SurveyState, token string, now time.Time) (domain.SurveyGuest, error) {
@@ -313,11 +365,17 @@ func surveyGuest(state domain.SurveyState, token string, now time.Time) (domain.
 }
 
 type SurveyPage struct {
-	ID         string                  `json:"id"`
-	Version    int                     `json:"version"`
-	Nickname   string                  `json:"nickname"`
-	ResponseID string                  `json:"responseId"`
-	Questions  []domain.SurveyQuestion `json:"questions"`
+	ID            string                   `json:"id"`
+	Version       int                      `json:"version"`
+	Nickname      string                   `json:"nickname"`
+	ResponseID    string                   `json:"responseId"`
+	Questions     []domain.SurveyQuestion  `json:"questions"`
+	Draft         *domain.SurveySubmission `json:"draft,omitempty"`
+	DraftSavedAt  *time.Time               `json:"draftSavedAt,omitempty"`
+	DraftStep     int                      `json:"draftStep,omitempty"`
+	DraftRevision int64                    `json:"draftRevision,omitempty"`
+	ExpiresAt     time.Time                `json:"expiresAt"`
+	RecoveryCode  string                   `json:"recoveryCode,omitempty"`
 }
 
 func (s *Service) GetSurvey(ctx context.Context, token string) (SurveyPage, error) {
@@ -331,7 +389,7 @@ func (s *Service) GetSurvey(ctx context.Context, token string) (SurveyPage, erro
 	}
 	guest, err := surveyGuest(state, token, s.now())
 	if err == nil && guest.ResponseID != "" {
-		return SurveyPage{store.SurveyID(ctx), 1, guest.Nickname, guest.ResponseID, []domain.SurveyQuestion{}}, nil
+		return SurveyPage{ID: store.SurveyID(ctx), Version: 1, Nickname: guest.Nickname, ResponseID: guest.ResponseID, Questions: []domain.SurveyQuestion{}, ExpiresAt: guest.ExpiresAt}, nil
 	}
 	if closed := requireSurveyOpen(state); closed != nil {
 		return SurveyPage{}, closed
@@ -339,19 +397,16 @@ func (s *Service) GetSurvey(ctx context.Context, token string) (SurveyPage, erro
 	if err != nil {
 		return SurveyPage{}, err
 	}
-	return SurveyPage{store.SurveyID(ctx), 1, guest.Nickname, guest.ResponseID, domain.SurveyQuestions()}, nil
+	return SurveyPage{ID: store.SurveyID(ctx), Version: 1, Nickname: guest.Nickname, ResponseID: guest.ResponseID, Questions: domain.SurveyQuestions(), Draft: guest.Draft, DraftSavedAt: guest.DraftSavedAt, DraftStep: guest.DraftStep, DraftRevision: guest.DraftRevision, ExpiresAt: guest.ExpiresAt}, nil
 }
-func validateSurvey(input domain.SurveySubmission) error {
+func validateSurveyFields(input domain.SurveySubmission) error {
 	invalid := func(message string) error { return domain.NewError(400, "survey_answers_invalid", message) }
 	if input.Version != 1 {
 		return invalid("题目版本已变化，请刷新页面后重填")
 	}
-	if input.Analysis != "yes" {
-		return invalid("不同意内部需求分析时不保存本次答卷")
-	}
-	for _, value := range []string{input.Quote, input.ContactPermission} {
-		if value != "yes" && value != "no" {
-			return invalid("请分别选择三项使用许可")
+	for _, value := range []string{input.Analysis, input.Quote, input.ContactPermission} {
+		if value != "" && value != "yes" && value != "no" {
+			return invalid("使用许可选项无效")
 		}
 	}
 	if utf8.RuneCountInString(input.Contact) > 200 || (input.ContactPermission != "yes" && strings.TrimSpace(input.Contact) != "") {
@@ -393,10 +448,64 @@ func validateSurvey(input domain.SurveySubmission) error {
 			return invalid("暂无足够痛点不能与其他优先项同时选择")
 		}
 	}
+	return nil
+}
+func validateSurvey(input domain.SurveySubmission) error {
+	if err := validateSurveyFields(input); err != nil {
+		return err
+	}
+	if input.Analysis != "yes" {
+		return domain.NewError(400, "survey_answers_invalid", "不同意内部需求分析时不保存本次答卷")
+	}
+	if input.Quote == "" || input.ContactPermission == "" {
+		return domain.NewError(400, "survey_answers_invalid", "请分别选择三项使用许可")
+	}
 	if len(input.Answers["q1"].Choices) == 0 {
-		return invalid("请选择您的角色")
+		return domain.NewError(400, "survey_answers_invalid", "请选择您的角色")
 	}
 	return nil
+}
+
+func (s *Service) SaveSurveyDraft(ctx context.Context, token string, input domain.SurveySubmission, step int, revision int64) (*time.Time, error) {
+	if err := validateSurveyFields(input); err != nil {
+		return nil, err
+	}
+	if step < 0 || step > 3 || revision < 1 {
+		return nil, domain.NewError(400, "survey_draft_invalid", "草稿进度无效")
+	}
+	repo, err := s.surveyRepository()
+	if err != nil {
+		return nil, err
+	}
+	var savedAt *time.Time
+	err = repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error {
+		if err := requireSurveyOpen(*state); err != nil {
+			return err
+		}
+		guest, err := surveyGuest(*state, token, s.now())
+		if err != nil {
+			return err
+		}
+		if guest.ResponseID != "" {
+			return domain.NewError(409, "survey_already_submitted", "问卷已提交，不能再保存草稿")
+		}
+		if revision <= guest.DraftRevision {
+			savedAt = guest.DraftSavedAt
+			return nil
+		}
+		guest.DraftRevision = revision
+		if input.Analysis == "no" {
+			guest.Draft, guest.DraftSavedAt, guest.DraftStep = nil, nil, 0
+		} else {
+			now := s.now()
+			guest.Draft, guest.DraftSavedAt = &input, &now
+			guest.DraftStep = step
+			savedAt = &now
+		}
+		state.Guests[surveyHash(token)] = guest
+		return nil
+	})
+	return savedAt, err
 }
 func (s *Service) SubmitSurvey(ctx context.Context, token string, input domain.SurveySubmission) (string, error) {
 	repo, err := s.surveyRepository()
@@ -428,6 +537,7 @@ func (s *Service) SubmitSurvey(ctx context.Context, token string, input domain.S
 		}
 		state.Responses[id] = domain.SurveyResponse{ID: id, Nickname: guest.Nickname, CreatedAt: s.now(), SurveySubmission: input}
 		guest.ResponseID = id
+		guest.Draft, guest.DraftSavedAt, guest.RecoveryHash = nil, nil, ""
 		state.Guests[surveyHash(token)] = guest
 		return nil
 	})

@@ -30,6 +30,152 @@ func surveyFixture(t *testing.T) (*Service, *store.Memory, string) {
 	return service, repo, token
 }
 
+func TestSurveyUniqueNicknameAndDraftRecovery(t *testing.T) {
+	ctx := context.Background()
+	repo := store.NewMemoryBootstrap()
+	s := NewService(repo)
+	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return now }
+	if err := repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error { state.Settings.Open = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	challenge := func(id, nickname, recovery string, consent bool) SurveySessionInput {
+		t.Helper()
+		if err := repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error {
+			state.Challenges[id] = domain.SurveyChallenge{AnswerHash: surveyHash(id + ":123456"), ExpiresAt: s.now().Add(time.Minute)}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return SurveySessionInput{Nickname: nickname, ChallengeID: id, Code: "123456", SaveDraft: consent, RecoveryCode: recovery}
+	}
+	_, err := s.StartSurveySession(ctx, "source", challenge(strings.Repeat("1", 64), "Alice", "", false))
+	surveyStatus(t, err, 400)
+	first, err := s.StartSurveySession(ctx, "source", challenge(strings.Repeat("2", 64), "Alice", "", true))
+	if err != nil || len(first.RecoveryCode) != 64 {
+		t.Fatalf("start: %v", err)
+	}
+	_, err = s.StartSurveySession(ctx, "source", challenge(strings.Repeat("3", 64), "ＡＬＩＣＥ", "", true))
+	surveyStatus(t, err, 409)
+	draft := domain.SurveySubmission{Version: 1, Answers: map[string]domain.SurveyAnswer{"q1": {Choices: []string{"技术运维"}}}, ContactPermission: "", Analysis: ""}
+	_, err = s.SaveSurveyDraft(ctx, first.Token, draft, 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft.Answers["q1"] = domain.SurveyAnswer{Choices: []string{"导演／创意"}}
+	_, err = s.SaveSurveyDraft(ctx, first.Token, draft, 3, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SaveSurveyDraft(ctx, first.Token, domain.SurveySubmission{Version: 1}, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.GetSurvey(ctx, first.Token)
+	if err != nil || page.DraftStep != 3 || page.DraftRevision != 2 || page.Draft.Answers["q1"].Choices[0] != "导演／创意" {
+		t.Fatalf("draft order: %+v %v", page, err)
+	}
+	_, err = s.StartSurveySession(ctx, "source", challenge(strings.Repeat("4", 64), "Alice", strings.Repeat("0", 64), true))
+	surveyStatus(t, err, 400)
+	recovered, err := s.StartSurveySession(ctx, "source", challenge(strings.Repeat("5", 64), "ＡＬＩＣＥ", first.RecoveryCode, true))
+	if err != nil || recovered.RecoveryCode != "" {
+		t.Fatalf("recovery: %+v %v", recovered, err)
+	}
+	_, err = s.GetSurvey(ctx, first.Token)
+	surveyStatus(t, err, 401)
+	page, err = s.GetSurvey(ctx, recovered.Token)
+	if err != nil || page.Draft == nil || page.DraftStep != 3 {
+		t.Fatalf("recovered draft: %+v %v", page, err)
+	}
+	draft.Analysis = "no"
+	_, err = s.SaveSurveyDraft(ctx, recovered.Token, draft, 3, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ = s.GetSurvey(ctx, recovered.Token)
+	if page.Draft != nil {
+		t.Fatal("negative analysis must clear draft")
+	}
+	id, err := s.SubmitSurvey(ctx, recovered.Token, surveyInput())
+	if err != nil || id == "" {
+		t.Fatalf("submit: %v", err)
+	}
+	_, err = s.StartSurveySession(ctx, "source", challenge(strings.Repeat("6", 64), "alice", first.RecoveryCode, true))
+	surveyStatus(t, err, 409)
+	state, _ := repo.ReadSurvey(ctx)
+	if state.Guests[surveyHash(recovered.Token)].RecoveryHash != "" || state.Guests[surveyHash(recovered.Token)].Draft != nil {
+		t.Fatal("submitted secret or draft retained")
+	}
+}
+
+func TestSurveyUnsubmittedNicknameExpires(t *testing.T) {
+	ctx := context.Background()
+	repo := store.NewMemoryBootstrap()
+	s := NewService(repo)
+	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return now }
+	_ = repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error { state.Settings.Open = true; return nil })
+	seed := func(id string) SurveySessionInput {
+		if err := repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error {
+			state.Challenges[id] = domain.SurveyChallenge{AnswerHash: surveyHash(id + ":123456"), ExpiresAt: s.now().Add(time.Minute)}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return SurveySessionInput{Nickname: "访客", ChallengeID: id, Code: "123456", SaveDraft: true}
+	}
+	first, err := s.StartSurveySession(ctx, "source", seed(strings.Repeat("7", 64)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(7 * 24 * time.Hour)
+	_, err = s.GetSurvey(ctx, first.Token)
+	surveyStatus(t, err, 401)
+	_, err = s.StartSurveySession(ctx, "source", seed(strings.Repeat("8", 64)))
+	if err != nil {
+		t.Fatal("expired nickname should be available", err)
+	}
+}
+
+func TestSurveyConcurrentNicknameReservation(t *testing.T) {
+	ctx := context.Background()
+	repo := store.NewMemoryBootstrap()
+	s := NewService(repo)
+	ids := []string{strings.Repeat("a", 64), strings.Repeat("b", 64)}
+	if err := repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error {
+		state.Settings.Open = true
+		for _, id := range ids {
+			state.Challenges[id] = domain.SurveyChallenge{AnswerHash: surveyHash(id + ":123456"), ExpiresAt: time.Now().Add(time.Minute)}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	outcomes := make(chan error, 2)
+	for _, id := range ids {
+		wg.Add(1)
+		go func(challengeID string) {
+			defer wg.Done()
+			_, err := s.StartSurveySession(ctx, "source", SurveySessionInput{Nickname: " 同名访客 ", ChallengeID: challengeID, Code: "123456", SaveDraft: true})
+			outcomes <- err
+		}(id)
+	}
+	wg.Wait()
+	close(outcomes)
+	success := 0
+	for err := range outcomes {
+		if err == nil {
+			success++
+		} else {
+			surveyStatus(t, err, 409)
+		}
+	}
+	if success != 1 {
+		t.Fatalf("successful reservations=%d want 1", success)
+	}
+}
+
 func TestSurveySwitchDefaultClosedAndRetainsResponses(t *testing.T) {
 	ctx := context.Background()
 	repo := store.NewMemoryBootstrap()
@@ -43,7 +189,7 @@ func TestSurveySwitchDefaultClosedAndRetainsResponses(t *testing.T) {
 	surveyStatus(t, err, 423)
 	_, err = s.CreateSurveyCaptcha(ctx, "source")
 	surveyStatus(t, err, 423)
-	_, err = s.StartSurveySession(ctx, "source", SurveySessionInput{Nickname: "测试", ChallengeID: strings.Repeat("c", 64), Code: "123456"})
+	_, err = s.StartSurveySession(ctx, "source", SurveySessionInput{Nickname: "测试", ChallengeID: strings.Repeat("c", 64), Code: "123456", SaveDraft: true})
 	surveyStatus(t, err, 423)
 	_, err = s.SetSurveySettings(ctx, "unknown", true, 0)
 	surveyStatus(t, err, 403)
@@ -308,7 +454,7 @@ func TestSurveyCAPTCHAExpiryReplayAndLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	input := SurveySessionInput{Nickname: "访客", ChallengeID: captcha.ChallengeID, Code: "654321"}
+	input := SurveySessionInput{Nickname: "访客", ChallengeID: captcha.ChallengeID, Code: "654321", SaveDraft: true}
 	seed(s.now().Add(time.Minute))
 	_, err = s.StartSurveySession(ctx, "source", input)
 	surveyStatus(t, err, 400)
@@ -319,21 +465,21 @@ func TestSurveyCAPTCHAExpiryReplayAndLimits(t *testing.T) {
 	_, err = s.StartSurveySession(ctx, "source", input)
 	surveyStatus(t, err, 400)
 	seed(s.now().Add(time.Minute))
-	token, err := s.StartSurveySession(ctx, "source", input)
+	credentials, err := s.StartSurveySession(ctx, "source", input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = s.StartSurveySession(ctx, "source", input)
 	surveyStatus(t, err, 400)
 	state, _ := repo.ReadSurvey(ctx)
-	if _, ok := state.Guests[token]; ok {
+	if _, ok := state.Guests[credentials.Token]; ok {
 		t.Fatal("raw token persisted")
 	}
-	if _, err = s.GetSurvey(ctx, token); err != nil {
+	if _, err = s.GetSurvey(ctx, credentials.Token); err != nil {
 		t.Fatal(err)
 	}
-	s.now = func() time.Time { return time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC) }
-	_, err = s.GetSurvey(ctx, token)
+	s.now = func() time.Time { return time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC) }
+	_, err = s.GetSurvey(ctx, credentials.Token)
 	surveyStatus(t, err, 401)
 	if err = repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error {
 		state.Rates[surveyHash("limited")] = domain.SurveyRate{Count: 120, ExpiresAt: s.now().Add(time.Minute)}

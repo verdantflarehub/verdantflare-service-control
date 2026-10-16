@@ -41,9 +41,15 @@ type SurveyChallenge struct {
 	ExpiresAt  time.Time `json:"expiresAt"`
 }
 type SurveyGuest struct {
-	Nickname   string    `json:"nickname"`
-	ExpiresAt  time.Time `json:"expiresAt"`
-	ResponseID string    `json:"responseId"`
+	Nickname       string            `json:"nickname"`
+	ExpiresAt      time.Time         `json:"expiresAt"`
+	ResponseID     string            `json:"responseId"`
+	RecoveryHash   string            `json:"recoveryHash,omitempty"`
+	DraftConsentAt time.Time         `json:"draftConsentAt,omitempty"`
+	Draft          *SurveySubmission `json:"draft,omitempty"`
+	DraftSavedAt   *time.Time        `json:"draftSavedAt,omitempty"`
+	DraftStep      int               `json:"draftStep,omitempty"`
+	DraftRevision  int64             `json:"draftRevision,omitempty"`
 }
 type SurveyRate struct {
 	Count     int       `json:"count"`

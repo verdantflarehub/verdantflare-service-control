@@ -36,6 +36,7 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("GET /api/control/public/surveys/{surveyID}/metadata", server.surveyMetadata)
 	mux.HandleFunc("POST /api/control/public/surveys/{surveyID}/session", server.surveySession)
 	mux.HandleFunc("GET /api/control/public/surveys/{surveyID}", server.surveyPage)
+	mux.HandleFunc("POST /api/control/public/surveys/{surveyID}/draft", server.surveyDraft)
 	mux.HandleFunc("POST /api/control/public/surveys/{surveyID}/responses", server.surveySubmit)
 	mux.HandleFunc("GET /api/control/ops/surveys/{surveyID}/stats", server.surveyStats)
 	mux.HandleFunc("GET /api/control/ops/surveys", server.surveyList)

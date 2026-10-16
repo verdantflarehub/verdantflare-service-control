@@ -69,7 +69,7 @@ func TestSurveyHTTPGuestFlowAndAuthentication(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	body := `{"nickname":"测试访客","challengeId":"` + challenge + `","code":"123456"}`
+	body := `{"nickname":"测试访客","challengeId":"` + challenge + `","code":"123456","saveDraft":true}`
 	assertStatus(do("POST", base+"/session", body, "https://evil.example", ""), 403)
 	assertStatus(do("POST", base+"/session", body, "", ""), 403)
 	w := do("POST", base+"/session", body, "https://hub.example.test", "")
@@ -82,11 +82,24 @@ func TestSurveyHTTPGuestFlowAndAuthentication(t *testing.T) {
 	if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/api/control/public/surveys/" {
 		t.Fatal("unsafe cookie flags")
 	}
+	var started map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &started); err != nil || len(started["recoveryCode"].(string)) != 64 {
+		t.Fatal("new session must show one-time recovery code", err)
+	}
+	draft := `{"version":1,"answers":{"q1":{"choices":["技术运维"]}},"step":1,"revision":1}`
+	assertStatus(do("POST", base+"/draft", draft, "https://evil.example", ""), 403)
+	assertStatus(do("POST", base+"/draft", draft, "https://hub.example.test", ""), 200)
+	w = do("GET", base, "", "", "")
+	assertStatus(w, 200)
+	if !strings.Contains(w.Body.String(), `"draftStep":1`) || !strings.Contains(w.Body.String(), `"draftRevision":1`) || strings.Contains(w.Body.String(), `"recoveryCode"`) {
+		t.Fatal("draft was not restored safely")
+	}
 	assertStatus(do("GET", base, "", "", ""), 200)
 	assertStatus(do("POST", base+"/responses", `{"version":1,"unknown":true}`, "https://hub.example.test", ""), 400)
 	assertStatus(do("POST", base+"/responses", `{"answers":{"q4":{"text":"`+strings.Repeat("x", 66000)+`"}}}`, "https://hub.example.test", ""), 400)
 	submission := `{"version":1,"analysis":"yes","quote":"no","contactPermission":"no","contact":"","answers":{"q1":{"choices":["技术运维"]}}}`
 	assertStatus(do("PUT", settingsPath, `{"open":false,"expectedVersion":1}`, "https://hub.example.test", admin), 200)
+	assertStatus(do("POST", base+"/draft", draft, "https://hub.example.test", ""), 423)
 	assertStatus(do("POST", base+"/responses", submission, "https://hub.example.test", ""), 423)
 	assertStatus(do("POST", base+"/session", body, "https://hub.example.test", ""), 423)
 	assertStatus(do("GET", base, "", "", ""), 423)
@@ -110,7 +123,7 @@ func TestSurveyHTTPGuestFlowAndAuthentication(t *testing.T) {
 	assertStatus(do("GET", "/api/control/ops/surveys/"+domain.SurveyID+"/stats", "", "", "00000000-0000-4000-8000-000000000001"), 200)
 	w = do("GET", base, "", "", "")
 	assertStatus(w, 200)
-	if strings.Contains(w.Body.String(), "answerHash") || strings.Contains(w.Body.String(), "expiresAt") || strings.Contains(w.Body.String(), "contactPermission") || strings.Contains(w.Body.String(), "updatedBy") {
+	if strings.Contains(w.Body.String(), "answerHash") || strings.Contains(w.Body.String(), "recoveryHash") || strings.Contains(w.Body.String(), "contactPermission") || strings.Contains(w.Body.String(), "updatedBy") {
 		t.Fatal("private repository state leaked")
 	}
 }
