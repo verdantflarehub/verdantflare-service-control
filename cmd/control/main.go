@@ -83,12 +83,26 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
+		nextSurveySweep := time.Time{}
 		for {
 			operationContext, cancel := context.WithTimeout(sweepContext, 10*time.Second)
 			if err := service.SweepModelExperienceRuns(operationContext); err != nil && sweepContext.Err() == nil {
 				logger.Error("model experience cleanup failed", "error", err)
 			}
 			cancel()
+			if !time.Now().Before(nextSurveySweep) {
+				surveyContext, cancelSurvey := context.WithTimeout(sweepContext, 30*time.Second)
+				err := service.SweepSurveyResponses(surveyContext)
+				cancelSurvey()
+				if err != nil {
+					if sweepContext.Err() == nil {
+						logger.Error("survey response cleanup failed", "error", err)
+					}
+					nextSurveySweep = time.Now().Add(time.Minute)
+				} else {
+					nextSurveySweep = time.Now().Add(time.Hour)
+				}
+			}
 			select {
 			case <-sweepContext.Done():
 				return

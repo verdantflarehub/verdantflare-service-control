@@ -510,3 +510,52 @@ func TestSurveyAdminOrganizationAndRoleBoundary(t *testing.T) {
 	_, err = s.GetSurveyResponse(ctx, admin, "id")
 	surveyStatus(t, err, 403)
 }
+
+func TestSurveyResponseRetentionSweep(t *testing.T) {
+	ctx := context.Background()
+	repo := store.NewMemoryBootstrap()
+	s := NewService(repo)
+	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return now }
+	if err := repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error {
+		state.Settings.Open = true
+		state.Responses["expired"] = domain.SurveyResponse{ID: "expired", Nickname: "旧昵称", CreatedAt: now.Add(-surveyResponseRetention)}
+		state.Responses["current"] = domain.SurveyResponse{ID: "current", Nickname: "新昵称", CreatedAt: now.Add(-surveyResponseRetention + time.Second)}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := s.CreateSurvey(ctx, "00000000-0000-4000-8000-000000000001", "另一个问卷", "", "11111111-1111-4111-8111-111111111111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherCtx := store.WithSurveyID(ctx, meta.ID)
+	if err := repo.UpdateSurvey(otherCtx, func(state *domain.SurveyState) error {
+		state.Responses["other-expired"] = domain.SurveyResponse{ID: "other-expired", Nickname: "其他旧昵称", CreatedAt: now.Add(-surveyResponseRetention - time.Hour)}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SweepSurveyResponses(ctx); err != nil {
+		t.Fatal(err)
+	}
+	state, err := repo.ReadSurvey(ctx)
+	if err != nil || len(state.Responses) != 1 || state.Responses["current"].Nickname != "新昵称" {
+		t.Fatalf("first survey retention: %+v, %v", state.Responses, err)
+	}
+	other, err := repo.ReadSurvey(otherCtx)
+	if err != nil || len(other.Responses) != 0 {
+		t.Fatalf("second survey retention: %+v, %v", other.Responses, err)
+	}
+	challengeID := strings.Repeat("b", 64)
+	if err := repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error {
+		state.Challenges[challengeID] = domain.SurveyChallenge{AnswerHash: surveyHash(challengeID + ":123456"), ExpiresAt: now.Add(time.Minute)}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.StartSurveySession(ctx, "retention-test", SurveySessionInput{Nickname: "旧昵称", ChallengeID: challengeID, Code: "123456", SaveDraft: true})
+	if err != nil {
+		t.Fatalf("expired nickname should be reusable: %v", err)
+	}
+}

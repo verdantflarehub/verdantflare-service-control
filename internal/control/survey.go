@@ -45,6 +45,8 @@ func (s *Service) surveyRepository() (store.SurveyRepository, error) {
 
 var surveyRequestID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
+const surveyResponseRetention = 180 * 24 * time.Hour
+
 func (s *Service) requireSurveyAdmin(ctx context.Context, subject string) error {
 	org, roles, _, err := s.activeOrganization(ctx, subject)
 	if err != nil {
@@ -142,6 +144,45 @@ func surveyCleanup(state *domain.SurveyState, now time.Time) {
 			delete(state.Rates, key)
 		}
 	}
+	for key, response := range state.Responses {
+		if !now.Before(response.CreatedAt.Add(surveyResponseRetention)) {
+			delete(state.Responses, key)
+		}
+	}
+}
+
+// SweepSurveyResponses removes expired survey data from storage, including on
+// otherwise inactive surveys. Every update rechecks expiry while holding the
+// repository's survey lock so a concurrent submission cannot be lost.
+func (s *Service) SweepSurveyResponses(ctx context.Context) error {
+	repo, err := s.surveyRepository()
+	if err != nil {
+		return err
+	}
+	states, err := repo.ListSurveys(ctx)
+	if err != nil {
+		return err
+	}
+	now := s.now()
+	for _, state := range states {
+		expired := false
+		for _, response := range state.Responses {
+			if !now.Before(response.CreatedAt.Add(surveyResponseRetention)) {
+				expired = true
+				break
+			}
+		}
+		if !expired {
+			continue
+		}
+		if err := repo.UpdateSurvey(store.WithSurveyID(ctx, state.Metadata.ID), func(current *domain.SurveyState) error {
+			surveyCleanup(current, s.now())
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func surveyRate(state *domain.SurveyState, source string, now time.Time) error {
 	surveyCleanup(state, now)
