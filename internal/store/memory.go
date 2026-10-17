@@ -45,7 +45,7 @@ func NewMemoryBootstrap() *Memory {
 		users: map[string]domain.CenterUser{
 			adminSubject: {
 				LoginSubject: adminSubject, CenterUserID: "cu_01HUB7C9Q", DisplayName: "管理员",
-				Email: "admin@verdantflarehub.com", ActiveOrganizationID: organizationID,
+				Email: "admin@verdantflare.ai", ActiveOrganizationID: organizationID,
 				Memberships: []domain.Membership{{OrganizationID: organizationID, Roles: []string{"organization_admin", "app_ops_admin", "customer_success_admin", "api_ops_admin"}}},
 			},
 		},
@@ -89,7 +89,7 @@ func NewMemorySeeded(now time.Time) *Memory {
 		surveys: map[string]domain.SurveyState{domain.SurveyID: {}},
 		users: map[string]domain.CenterUser{
 			"00000000-0000-4000-8000-000000000001": {
-				CenterUserID: "cu_01HUB7C9Q", LoginSubject: "00000000-0000-4000-8000-000000000001", DisplayName: "默认管理员", Email: "admin@verdantflarehub.com", ActiveOrganizationID: verdantflare.OrganizationID,
+				CenterUserID: "cu_01HUB7C9Q", LoginSubject: "00000000-0000-4000-8000-000000000001", DisplayName: "默认管理员", Email: "admin@verdantflare.ai", ActiveOrganizationID: verdantflare.OrganizationID,
 				Memberships: []domain.Membership{
 					{OrganizationID: verdantflare.OrganizationID, Roles: []string{"organization_admin", "app_ops_admin", "customer_success_admin", "api_ops_admin"}},
 					{OrganizationID: northshore.OrganizationID, Roles: []string{"organization_admin"}},
