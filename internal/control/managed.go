@@ -18,6 +18,9 @@ type ManagedAppInput struct {
 	ID            string              `json:"id"`
 	Name          string              `json:"name"`
 	GroupID       string              `json:"groupId"`
+	SortOrder     int                 `json:"sortOrder"`
+	Brand         string              `json:"brand"`
+	IconRef       string              `json:"iconRef"`
 	Category      string              `json:"category"`
 	Summary       string              `json:"summary"`
 	Version       string              `json:"version"`
@@ -76,8 +79,11 @@ func validateManagedApp(input ManagedAppInput) error {
 	if !slices.Contains([]string{"Candidate", "Listed", "Preview", "Stable", "Paused"}, input.Channel) {
 		return domain.NewError(400, "channel_invalid", "不支持的发布通道")
 	}
-	if input.GroupID != "" && !slices.Contains([]string{"image", "music", "video", "agent"}, input.GroupID) {
-		return domain.NewError(400, "app_group_invalid", "应用分组须为 image、music、video 或 agent")
+	if input.GroupID != "" && !slices.Contains([]string{"image", "music", "video", "desktop", "system", "channel", "agent"}, input.GroupID) {
+		return domain.NewError(400, "app_group_invalid", "应用分组须为 image、music、video、desktop、system、channel 或 agent")
+	}
+	if input.SortOrder < 0 || input.SortOrder > 1000000 {
+		return domain.NewError(400, "app_sort_order_invalid", "应用排序须为 0 至 1000000 的整数")
 	}
 	if slices.Contains([]string{"Preview", "Stable"}, input.Channel) && strings.TrimSpace(input.Version) == "" {
 		return domain.NewError(400, "app_version_required", "公开或预览应用的目录版本不能为空；资料草稿可以留空")
@@ -133,7 +139,7 @@ func appFromInput(input ManagedAppInput) domain.App {
 	if tone == "" {
 		tone = "mint"
 	}
-	return domain.App{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), GroupID: input.GroupID, Category: strings.TrimSpace(input.Category), Summary: strings.TrimSpace(input.Summary), Version: strings.TrimSpace(input.Version), GPU: strings.TrimSpace(input.GPU), Duration: strings.TrimSpace(input.Duration), Icon: icon, Tone: tone, Channel: input.Channel, Developer: strings.TrimSpace(input.Developer), Description: strings.TrimSpace(input.Description), Memory: strings.TrimSpace(input.Memory), Disk: strings.TrimSpace(input.Disk), CPU: strings.TrimSpace(input.CPU), PublicIconURL: strings.TrimSpace(input.PublicIconURL), PublicVisible: input.PublicVisible, Showcase: showcase}
+	return domain.App{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), GroupID: input.GroupID, SortOrder: input.SortOrder, Brand: strings.TrimSpace(input.Brand), IconRef: strings.TrimSpace(input.IconRef), Category: strings.TrimSpace(input.Category), Summary: strings.TrimSpace(input.Summary), Version: strings.TrimSpace(input.Version), GPU: strings.TrimSpace(input.GPU), Duration: strings.TrimSpace(input.Duration), Icon: icon, Tone: tone, Channel: input.Channel, Developer: strings.TrimSpace(input.Developer), Description: strings.TrimSpace(input.Description), Memory: strings.TrimSpace(input.Memory), Disk: strings.TrimSpace(input.Disk), CPU: strings.TrimSpace(input.CPU), PublicIconURL: strings.TrimSpace(input.PublicIconURL), PublicVisible: input.PublicVisible, Showcase: showcase}
 }
 
 func (s *Service) CreateManagedApp(ctx context.Context, subject string, input ManagedAppInput) (domain.ManagedApp, error) {

@@ -54,6 +54,9 @@ type App struct {
 	ID            string      `json:"id"`
 	Name          string      `json:"name"`
 	GroupID       string      `json:"groupId,omitempty"`
+	SortOrder     int         `json:"sortOrder"`
+	Brand         string      `json:"brand,omitempty"`
+	IconRef       string      `json:"iconRef,omitempty"`
 	Category      string      `json:"category"`
 	Summary       string      `json:"summary"`
 	Version       string      `json:"version"`
@@ -282,6 +285,7 @@ type Invoice struct {
 type Release struct {
 	AppID      string `json:"appId"`
 	App        string `json:"app"`
+	GroupID    string `json:"groupId,omitempty"`
 	Version    string `json:"version"`
 	Channel    string `json:"channel"`
 	Validation string `json:"validation"`
