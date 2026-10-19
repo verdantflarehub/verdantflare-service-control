@@ -475,7 +475,7 @@ func (m *Memory) ListReleases(_ context.Context) ([]domain.Release, error) {
 	defer m.mu.RUnlock()
 	result := make([]domain.Release, 0, len(m.apps))
 	for _, app := range m.apps {
-		if app.Visibility == "hidden" && app.GroupID == "agent" {
+		if app.Visibility == "hidden" && (app.GroupID == "agent" || strings.Contains(app.DisabledReason, "未纳入 Station 应用目录")) {
 			continue
 		}
 		result = append(result, m.releaseForLocked(app))
