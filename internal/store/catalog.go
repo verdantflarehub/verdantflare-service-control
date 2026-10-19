@@ -17,12 +17,20 @@ func (m *Memory) PublicCatalog(_ context.Context) (domain.PublicCatalog, error) 
 		}
 	}
 	for _, app := range m.apps {
+		if app.Visibility == "hidden" {
+			continue
+		}
 		if app.PublicVisible && published(app) {
-			result.Apps = append(result.Apps, domain.PublicApp{ID: app.ID, Name: app.Name, Category: app.Category, Summary: app.Summary, Version: app.Version, Developer: app.Developer, Description: app.Description, Memory: app.Memory, Disk: app.Disk, CPU: app.CPU, GPU: app.GPU, IconURL: app.PublicIconURL})
+			result.Apps = append(result.Apps, domain.PublicApp{ID: app.ID, Name: app.Name, Category: app.Category, Summary: app.Summary, Version: app.Version, Developer: app.Developer, Description: app.Description, Brand: app.Brand, IconRef: app.IconRef, SortOrder: app.SortOrder, Memory: app.Memory, Disk: app.Disk, CPU: app.CPU, GPU: app.GPU, IconURL: app.PublicIconURL})
 		}
 	}
 	sort.Slice(result.Models, func(i, j int) bool { return result.Models[i].ID < result.Models[j].ID })
-	sort.Slice(result.Apps, func(i, j int) bool { return result.Apps[i].ID < result.Apps[j].ID })
+	sort.Slice(result.Apps, func(i, j int) bool {
+		if result.Apps[i].SortOrder != result.Apps[j].SortOrder {
+			return result.Apps[i].SortOrder < result.Apps[j].SortOrder
+		}
+		return result.Apps[i].ID < result.Apps[j].ID
+	})
 	return result, nil
 }
 

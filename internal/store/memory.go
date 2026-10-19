@@ -271,6 +271,9 @@ func (m *Memory) ListApps(_ context.Context, organizationID string) ([]domain.Ap
 	active := m.organizations[organizationID].Status != "冻结"
 	result := make([]domain.App, 0, len(m.apps))
 	for id, app := range m.apps {
+		if app.Visibility == "hidden" {
+			continue
+		}
 		if !published(app) && app.Channel != "Listed" {
 			continue
 		}
@@ -279,7 +282,12 @@ func (m *Memory) ListApps(_ context.Context, organizationID string) ([]domain.Ap
 			result = append(result, app)
 		}
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].SortOrder != result[j].SortOrder {
+			return result[i].SortOrder < result[j].SortOrder
+		}
+		return result[i].Name < result[j].Name
+	})
 	return result, nil
 }
 
@@ -287,7 +295,7 @@ func (m *Memory) GetApp(_ context.Context, organizationID, appID string) (domain
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	app, ok := m.apps[appID]
-	if !ok || (!published(app) && app.Channel != "Listed") {
+	if !ok || app.Visibility == "hidden" || (!published(app) && app.Channel != "Listed") {
 		return domain.App{}, domain.NewError(404, "app_not_found", "应用不存在")
 	}
 	app.Entitled = published(app) && m.organizations[organizationID].Status != "冻结" && m.entitlements[organizationID][appID]
@@ -467,9 +475,17 @@ func (m *Memory) ListReleases(_ context.Context) ([]domain.Release, error) {
 	defer m.mu.RUnlock()
 	result := make([]domain.Release, 0, len(m.apps))
 	for _, app := range m.apps {
+		if app.Visibility == "hidden" && app.GroupID == "agent" {
+			continue
+		}
 		result = append(result, m.releaseForLocked(app))
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].App < result[j].App })
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].SortOrder != result[j].SortOrder {
+			return result[i].SortOrder < result[j].SortOrder
+		}
+		return result[i].App < result[j].App
+	})
 	return result, nil
 }
 

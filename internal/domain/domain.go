@@ -177,6 +177,9 @@ type GuestApp struct {
 	Channel     string      `json:"channel"`
 	Developer   string      `json:"developer,omitempty"`
 	Description string      `json:"description,omitempty"`
+	Brand       string      `json:"brand,omitempty"`
+	IconRef     string      `json:"iconRef,omitempty"`
+	SortOrder   int         `json:"sortOrder,omitempty"`
 	IconURL     string      `json:"iconUrl,omitempty"`
 	Showcase    AppShowcase `json:"showcase"`
 }
@@ -197,6 +200,9 @@ type PublicApp struct {
 	Version     string `json:"version"`
 	Developer   string `json:"developer,omitempty"`
 	Description string `json:"description,omitempty"`
+	Brand       string `json:"brand,omitempty"`
+	IconRef     string `json:"iconRef,omitempty"`
+	SortOrder   int    `json:"sortOrder,omitempty"`
 	Memory      string `json:"memory,omitempty"`
 	Disk        string `json:"disk,omitempty"`
 	CPU         string `json:"cpu,omitempty"`
@@ -331,6 +337,10 @@ type Release struct {
 	AppID            string `json:"appId"`
 	App              string `json:"app"`
 	GroupID          string `json:"groupId,omitempty"`
+	Brand            string `json:"brand,omitempty"`
+	IconRef          string `json:"iconRef,omitempty"`
+	PublicIconURL    string `json:"publicIconUrl,omitempty"`
+	SortOrder        int    `json:"sortOrder,omitempty"`
 	Version          string `json:"version"`
 	PublishedVersion string `json:"publishedVersion,omitempty"`
 	Channel          string `json:"channel"`

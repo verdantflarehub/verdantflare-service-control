@@ -44,8 +44,10 @@ type PatchAppV2Input struct {
 	Models           *[]string            `json:"models"`
 	Capabilities     *[]string            `json:"capabilities"`
 	Images           *[]domain.AppImageRef `json:"images"`
+	Version          *string              `json:"version"`
 	Channel          *string              `json:"channel"`
 	Developer        *string              `json:"developer"`
+	PublicIconURL    *string              `json:"publicIconUrl"`
 	PublicVisible    *bool                `json:"publicVisible"`
 	Showcase         *domain.AppShowcase  `json:"showcase"`
 	PublishedVersion *string              `json:"publishedVersion"`
@@ -239,11 +241,19 @@ func (s *Service) PatchManagedAppV2(ctx context.Context, subject, appID, ifMatch
 	if input.Images != nil {
 		updated.Images = slices.Clone(*input.Images)
 	}
+	if input.Version != nil {
+		updated.Version = strings.TrimSpace(*input.Version)
+	}
 	if input.Developer != nil {
 		updated.Developer = strings.TrimSpace(*input.Developer)
 	}
+	if input.PublicIconURL != nil {
+		updated.PublicIconURL = strings.TrimSpace(*input.PublicIconURL)
+	}
 	if input.PublicVisible != nil {
 		updated.PublicVisible = *input.PublicVisible
+	} else if input.Visibility != nil {
+		updated.PublicVisible = updated.Visibility == "listed"
 	}
 	if input.Showcase != nil {
 		updated.Showcase = *input.Showcase
@@ -308,6 +318,7 @@ func (s *Service) SelectAppReleaseV2(ctx context.Context, subject, appID, ifMatc
 		updated.DisabledReason = ""
 		updated.Visibility = "listed"
 		updated.Channel = "Stable"
+		updated.PublicVisible = true
 		if len(verRecord.Models) > 0 || updated.Models == nil {
 			updated.Models = slices.Clone(verRecord.Models)
 		}

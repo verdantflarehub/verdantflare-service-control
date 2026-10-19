@@ -83,6 +83,10 @@ func (m *Memory) releaseForLocked(app domain.App) domain.Release {
 		}
 	}
 	release.AppID, release.App, release.GroupID, release.Version, release.Channel = app.ID, app.Name, app.GroupID, app.Version, app.Channel
+	release.Brand = app.Brand
+	release.IconRef = app.IconRef
+	release.PublicIconURL = app.PublicIconURL
+	release.SortOrder = app.SortOrder
 	release.PublishedVersion = app.PublishedVersion
 	release.Visibility = app.Visibility
 	release.Enabled = app.Enabled
@@ -205,6 +209,10 @@ func (m *Memory) UpdateManagedApp(_ context.Context, id string, update domain.Ap
 	update = normalizeApp(update)
 	m.apps[id] = update
 	release.App, release.Version, release.Channel = update.Name, update.Version, update.Channel
+	release.Brand = update.Brand
+	release.IconRef = update.IconRef
+	release.PublicIconURL = update.PublicIconURL
+	release.SortOrder = update.SortOrder
 	release.PublishedVersion = update.PublishedVersion
 	release.Visibility = update.Visibility
 	release.Enabled = update.Enabled

@@ -117,7 +117,8 @@ func (s *Service) GuestCatalog(ctx context.Context) (domain.GuestCatalog, error)
 		result.Apps = append(result.Apps, domain.GuestApp{
 			ID: app.ID, Name: app.Name, Category: app.Category, Summary: app.Summary,
 			Version: app.Version, Channel: app.Channel, Developer: app.Developer,
-			Description: app.Description, IconURL: app.PublicIconURL, Showcase: app.Showcase,
+			Description: app.Description, Brand: app.Brand, IconRef: app.IconRef,
+			SortOrder: app.SortOrder, IconURL: app.PublicIconURL, Showcase: app.Showcase,
 		})
 	}
 	return result, nil

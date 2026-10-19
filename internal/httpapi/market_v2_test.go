@@ -387,10 +387,18 @@ func TestMarketV2ReleaseSelectionAndAppsYamlContract(t *testing.T) {
 	}
 	var publishedApp domain.App
 	decode(t, pubRes, &publishedApp)
-	if publishedApp.PublishedVersion != "0.1.3" || !publishedApp.Enabled || publishedApp.DisabledReason != "" {
+	if publishedApp.PublishedVersion != "0.1.3" || !publishedApp.Enabled || publishedApp.DisabledReason != "" || !publishedApp.PublicVisible {
 		t.Fatalf("unexpected published app state: %+v", publishedApp)
 	}
 	newETag := pubRes.Header.Get("ETag")
+
+	marketRes := request(t, server, http.MethodGet, "/api/control/market/apps", nil)
+	var marketApps []domain.App
+	decode(t, marketRes, &marketApps)
+	marketRes.Body.Close()
+	if !containsApp(marketApps, "flux-image") {
+		t.Fatalf("expected published v2 app flux-image to appear in GET /api/control/market/apps")
+	}
 
 	// Fetch /api/control/station/v2/apps.yaml and verify schemaVersion=2, no forbidden v1 fields
 	yamlRes := request(t, server, http.MethodGet, "/api/control/station/v2/apps.yaml", nil)
