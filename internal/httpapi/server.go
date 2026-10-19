@@ -28,6 +28,7 @@ type Server struct {
 }
 
 func New(config config.Config, service *control.Service, logger *slog.Logger) *Server {
+	service.SetChartRegistryDefaults(config.ChartRegistryHost, config.ChartRegistryInternalURL)
 	server := &Server{config: config, service: service, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", server.health)
@@ -97,6 +98,20 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("POST /api/control/ops/apps/{appID}/versions/{version}/station-grants", server.createStationTestGrant)
 	mux.HandleFunc("GET /api/control/ops/apps/{appID}/station-grants", server.listStationTestGrants)
 	mux.HandleFunc("DELETE /api/control/ops/apps/{appID}/versions/{version}/station-grants/{stationID}", server.revokeStationTestGrant)
+
+	mux.HandleFunc("GET /api/control/ops/v2/apps", server.listManagedAppsV2)
+	mux.HandleFunc("POST /api/control/ops/v2/apps", server.createManagedAppV2)
+	mux.HandleFunc("GET /api/control/ops/v2/apps/{appID}", server.getManagedAppV2)
+	mux.HandleFunc("PATCH /api/control/ops/v2/apps/{appID}", server.patchManagedAppV2)
+	mux.HandleFunc("POST /api/control/ops/v2/apps/{appID}/versions", server.createAppVersionV2)
+	mux.HandleFunc("GET /api/control/ops/v2/apps/{appID}/versions", server.listAppVersionsV2)
+	mux.HandleFunc("GET /api/control/ops/v2/apps/{appID}/versions/{version}", server.getAppVersionV2)
+	mux.HandleFunc("PUT /api/control/ops/v2/apps/{appID}/release", server.selectAppReleaseV2)
+	mux.HandleFunc("GET /api/control/ops/v2/apps.yaml", server.opsAppsYAMLV2)
+
+	mux.HandleFunc("GET /api/control/station/v2/apps.yaml", server.stationAppsYAMLV2)
+	mux.HandleFunc("GET /api/control/station/v2/apps/{appID}/versions/{version}", server.stationAppVersionV2)
+
 	mux.HandleFunc("POST /api/control/ops/organizations", server.createManagedOrganization)
 	mux.HandleFunc("GET /api/control/ops/organizations/{organizationID}", server.getManagedOrganization)
 	mux.HandleFunc("PATCH /api/control/ops/organizations/{organizationID}", server.updateManagedOrganization)
@@ -389,7 +404,19 @@ func (s *Server) writeError(writer http.ResponseWriter, request *http.Request, e
 	} else {
 		s.logger.Error("request failed", "request_id", requestID(request.Context()), "method", request.Method, "path", request.URL.Path, "error", err)
 	}
-	writeJSON(writer, status, map[string]any{"error": map[string]string{"code": code, "message": message, "requestId": requestID(request.Context())}})
+	reqID := requestID(request.Context())
+	retryable := status == http.StatusTooManyRequests || status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
+	writeJSON(writer, status, map[string]any{
+		"code":      code,
+		"message":   message,
+		"requestId": reqID,
+		"retryable": retryable,
+		"error": map[string]string{
+			"code":      code,
+			"message":   message,
+			"requestId": reqID,
+		},
+	})
 }
 
 func (s *Server) middleware(next http.Handler) http.Handler {
@@ -409,7 +436,8 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			writer.Header().Set("Access-Control-Allow-Origin", origin)
 			writer.Header().Set("Access-Control-Allow-Credentials", "true")
 			writer.Header().Set("Vary", "Origin")
-			writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID")
+			writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID, If-Match, If-None-Match, Authorization")
+			writer.Header().Set("Access-Control-Expose-Headers", "ETag, X-Request-ID")
 			writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			if request.Method == http.MethodOptions {
 				writer.WriteHeader(http.StatusNoContent)

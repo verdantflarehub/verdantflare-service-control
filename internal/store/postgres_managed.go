@@ -6,6 +6,14 @@ import (
 	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
 )
 
+func (p *Postgres) ListManagedApps(ctx context.Context) ([]domain.App, error) {
+	m, err := p.read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return m.ListManagedApps(ctx)
+}
+
 func (p *Postgres) CreateManagedApp(ctx context.Context, app domain.App) (result domain.ManagedApp, err error) {
 	err = p.mutate(ctx, func(m *Memory) error { var e error; result, e = m.CreateManagedApp(ctx, app); return e })
 	return

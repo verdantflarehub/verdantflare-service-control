@@ -43,6 +43,7 @@ type Repository interface {
 	Billing(context.Context, string) (domain.BillingSummary, error)
 
 	ListReleases(context.Context) ([]domain.Release, error)
+	ListManagedApps(context.Context) ([]domain.App, error)
 	ListOperationsOrganizations(context.Context) ([]domain.OperationsOrganization, error)
 	CreateManagedApp(context.Context, domain.App) (domain.ManagedApp, error)
 	ManagedApp(context.Context, string) (domain.ManagedApp, error)

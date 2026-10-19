@@ -32,6 +32,11 @@ func (m *Memory) ModelProviderIcon(_ context.Context, digest string) (domain.Mod
 }
 
 func (p *Postgres) PutModelProviderIcon(ctx context.Context, icon domain.ModelProviderIcon) error {
+	if icon.ContentType != "image/png" && icon.ContentType != "image/jpeg" {
+		return p.mutate(ctx, func(m *Memory) error {
+			return m.PutModelProviderIcon(ctx, icon)
+		})
+	}
 	_, err := p.db.ExecContext(ctx, `
 		INSERT INTO control_model_provider_icons (sha256, content_type, image_bytes, width, height)
 		VALUES ($1, $2, $3, $4, $5) ON CONFLICT (sha256) DO NOTHING`,
@@ -49,6 +54,12 @@ func (p *Postgres) ModelProviderIcon(ctx context.Context, digest string) (domain
 		FROM control_model_provider_icons WHERE sha256=$1`, digest,
 	).Scan(&icon.SHA256, &icon.ContentType, &icon.Data, &icon.Width, &icon.Height)
 	if errors.Is(err, sql.ErrNoRows) {
+		m, readErr := p.read(ctx)
+		if readErr == nil {
+			if memIcon, memErr := m.ModelProviderIcon(ctx, digest); memErr == nil {
+				return memIcon, nil
+			}
+		}
 		return domain.ModelProviderIcon{}, domain.NewError(404, "model_icon_not_found", "模型图标不存在")
 	}
 	if err != nil {

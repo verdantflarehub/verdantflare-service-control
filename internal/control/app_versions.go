@@ -25,6 +25,10 @@ var candidateImagePattern = regexp.MustCompile(`^\S+:(?:[a-z0-9][a-z0-9._-]*-)?v
 
 type CreateAppVersionInput struct {
 	Version         string                 `json:"version"`
+	AppVersion      string                 `json:"appVersion,omitempty"`
+	Chart           *CreateOCIChartInput   `json:"chart,omitempty"`
+	ReleaseNotes    string                 `json:"releaseNotes,omitempty"`
+	Changelog       string                 `json:"changelog,omitempty"`
 	UpstreamVersion string                 `json:"upstreamVersion"`
 	Publisher       string                 `json:"publisher"`
 	SourceURL       string                 `json:"sourceUrl"`
@@ -140,6 +144,19 @@ func validateCandidateManifest(raw []byte, appID, version string, evidence []dom
 }
 
 func (s *Service) CreateAppVersion(ctx context.Context, subject, appID string, input CreateAppVersionInput) (domain.AppVersion, error) {
+	if input.Chart != nil {
+		notes := strings.TrimSpace(input.ReleaseNotes)
+		if notes == "" {
+			notes = strings.TrimSpace(input.Changelog)
+		}
+		version, _, err := s.CreateOCIAppVersion(ctx, subject, appID, CreateOCIAppVersionInput{
+			Version:        input.Version,
+			Chart:          input.Chart,
+			ReleaseNotes:   notes,
+			SourceRevision: input.SourceRevision,
+		})
+		return version, err
+	}
 	if err := s.requireOperationsRole(ctx, subject, "app_ops_admin"); err != nil {
 		return domain.AppVersion{}, err
 	}

@@ -50,6 +50,8 @@ func (s *Server) StationHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/control/station/v1/catalog", s.stationCatalog)
 	mux.HandleFunc("GET /api/control/station/v1/apps/{appID}/versions/{version}/manifest", s.stationManifest)
+	mux.HandleFunc("GET /api/control/station/v2/apps.yaml", s.stationAppsYAMLV2)
+	mux.HandleFunc("GET /api/control/station/v2/apps/{appID}/versions/{version}", s.stationAppVersionV2)
 	return s.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.stationIdentity(w, r); !ok {
 			return

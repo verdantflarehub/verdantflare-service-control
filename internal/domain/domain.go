@@ -50,31 +50,76 @@ type Overview struct {
 	PreviewApps   int          `json:"previewApps"`
 }
 
+type AppImageRef struct {
+	Component string `json:"component" yaml:"component"`
+	Image     string `json:"image" yaml:"image"`
+}
+
+type LogoRef struct {
+	URL       string `json:"url" yaml:"url"`
+	Digest    string `json:"digest" yaml:"digest"`
+	MediaType string `json:"mediaType" yaml:"mediaType"`
+}
+
+type MarketCatalogItem struct {
+	AppID          string        `yaml:"appId" json:"appId"`
+	DisplayName    string        `yaml:"displayName" json:"displayName"`
+	SortOrder      int           `yaml:"sortOrder" json:"sortOrder"`
+	GroupID        string        `yaml:"groupId" json:"groupId"`
+	Brand          string        `yaml:"brand,omitempty" json:"brand,omitempty"`
+	IconRef        string        `yaml:"iconRef,omitempty" json:"iconRef,omitempty"`
+	Version        string        `yaml:"version,omitempty" json:"version,omitempty"`
+	Description    string        `yaml:"description" json:"description"`
+	Models         []string      `yaml:"models" json:"models"`
+	Capabilities   []string      `yaml:"capabilities" json:"capabilities"`
+	Images         []AppImageRef `yaml:"images" json:"images"`
+	Chart          string        `yaml:"chart,omitempty" json:"chart,omitempty"`
+	ChartVersion   string        `yaml:"chartVersion,omitempty" json:"chartVersion,omitempty"`
+	DisabledReason string        `yaml:"disabledReason,omitempty" json:"disabledReason,omitempty"`
+}
+
+type MarketAppsYaml struct {
+	SchemaVersion int                 `yaml:"schemaVersion" json:"schemaVersion"`
+	Apps          []MarketCatalogItem `yaml:"apps" json:"apps"`
+}
+
 type App struct {
-	ID            string      `json:"id"`
-	Name          string      `json:"name"`
-	GroupID       string      `json:"groupId,omitempty"`
-	SortOrder     int         `json:"sortOrder"`
-	Brand         string      `json:"brand,omitempty"`
-	IconRef       string      `json:"iconRef,omitempty"`
-	Category      string      `json:"category"`
-	Summary       string      `json:"summary"`
-	Version       string      `json:"version"`
-	Channel       string      `json:"channel"`
-	Status        string      `json:"status"`
-	Tone          string      `json:"tone"`
-	Icon          string      `json:"icon"`
-	GPU           string      `json:"gpu"`
-	Duration      string      `json:"duration"`
-	Developer     string      `json:"developer,omitempty"`
-	Description   string      `json:"description,omitempty"`
-	Memory        string      `json:"memory,omitempty"`
-	Disk          string      `json:"disk,omitempty"`
-	CPU           string      `json:"cpu,omitempty"`
-	PublicIconURL string      `json:"publicIconUrl,omitempty"`
-	PublicVisible bool        `json:"publicVisible"`
-	Entitled      bool        `json:"entitled"`
-	Showcase      AppShowcase `json:"showcase"`
+	ID               string        `json:"id"`
+	AppID            string        `json:"appId,omitempty"`
+	Name             string        `json:"name"`
+	GroupID          string        `json:"groupId,omitempty"`
+	SortOrder        int           `json:"sortOrder"`
+	Brand            string        `json:"brand,omitempty"`
+	IconRef          string        `json:"iconRef,omitempty"`
+	Visibility       string        `json:"visibility,omitempty"`
+	Enabled          bool          `json:"enabled"`
+	DisabledReason   string        `json:"disabledReason,omitempty"`
+	PublishedVersion string        `json:"publishedVersion,omitempty"`
+	Models           []string      `json:"models,omitempty"`
+	Capabilities     []string      `json:"capabilities,omitempty"`
+	Images           []AppImageRef `json:"images,omitempty"`
+	Logo             *LogoRef      `json:"logo,omitempty"`
+	Revision         int           `json:"revision,omitempty"`
+	CreatedAt        string        `json:"createdAt,omitempty"`
+	UpdatedAt        string        `json:"updatedAt,omitempty"`
+	Category         string        `json:"category"`
+	Summary          string        `json:"summary"`
+	Version          string        `json:"version"`
+	Channel          string        `json:"channel"`
+	Status           string        `json:"status"`
+	Tone             string        `json:"tone"`
+	Icon             string        `json:"icon"`
+	GPU              string        `json:"gpu"`
+	Duration         string        `json:"duration"`
+	Developer        string        `json:"developer,omitempty"`
+	Description      string        `json:"description,omitempty"`
+	Memory           string        `json:"memory,omitempty"`
+	Disk             string        `json:"disk,omitempty"`
+	CPU              string        `json:"cpu,omitempty"`
+	PublicIconURL    string        `json:"publicIconUrl,omitempty"`
+	PublicVisible    bool          `json:"publicVisible"`
+	Entitled         bool          `json:"entitled"`
+	Showcase         AppShowcase   `json:"showcase"`
 }
 
 // AppShowcase contains editorial Market content. It is never runtime evidence.
@@ -283,42 +328,77 @@ type Invoice struct {
 }
 
 type Release struct {
-	AppID      string `json:"appId"`
-	App        string `json:"app"`
-	GroupID    string `json:"groupId,omitempty"`
-	Version    string `json:"version"`
-	Channel    string `json:"channel"`
-	Validation string `json:"validation"`
-	Audience   string `json:"audience"`
-	Updated    string `json:"updated"`
-	Status     string `json:"status"`
+	AppID            string `json:"appId"`
+	App              string `json:"app"`
+	GroupID          string `json:"groupId,omitempty"`
+	Version          string `json:"version"`
+	PublishedVersion string `json:"publishedVersion,omitempty"`
+	Channel          string `json:"channel"`
+	Visibility       string `json:"visibility,omitempty"`
+	Enabled          bool   `json:"enabled"`
+	DisabledReason   string `json:"disabledReason,omitempty"`
+	Chart            string `json:"chart,omitempty"`
+	ChartVersion     string `json:"chartVersion,omitempty"`
+	Revision         int    `json:"revision,omitempty"`
+	Validation       string `json:"validation"`
+	Audience         string `json:"audience"`
+	Updated          string `json:"updated"`
+	Status           string `json:"status"`
 }
 
 type ManagedApp struct {
-	App     App     `json:"app"`
-	Release Release `json:"release"`
+	App       App          `json:"app"`
+	Release   Release      `json:"release"`
+	Published *AppVersion  `json:"published,omitempty"`
+	Versions  []AppVersion `json:"versions,omitempty"`
 }
 
-// AppVersion is a sealed Center candidate, not a Station installation record.
-// Manifest and image references are content-addressed at creation; publishing
-// and Station registration remain separate decisions.
+type AppVersionChart struct {
+	OCIRef           string  `json:"ociRef"`
+	Name             string  `json:"name"`
+	Version          string  `json:"version"`
+	AppVersion       *string `json:"appVersion"`
+	ManifestDigest   string  `json:"manifestDigest"`
+	PackageDigest    string  `json:"packageDigest"`
+	PackageSizeBytes int64   `json:"packageSizeBytes"`
+}
+
+type AppCompatibility struct {
+	KubernetesVersionRange *string  `json:"kubernetesVersionRange"`
+	MinimumRuntimeVersion  *string  `json:"minimumRuntimeVersion"`
+	Architectures          []string `json:"architectures"`
+}
+
+type AppDependencyRef = AppDependency
+
+// AppVersion is an immutable OCI installation input or sealed Center candidate.
+// Manifest, chart and image references are content-addressed at creation; publishing
+// and Station installation remain separate decisions.
 type AppVersion struct {
 	AppID           string            `json:"appId"`
 	Version         string            `json:"version"`
-	UpstreamVersion string            `json:"upstreamVersion,omitempty"`
-	Publisher       string            `json:"publisher"`
-	SourceURL       string            `json:"sourceUrl"`
-	SourceRevision  string            `json:"sourceRevision"`
-	LicenseID       string            `json:"licenseId"`
-	LicenseURL      string            `json:"licenseUrl"`
-	ManifestRef     string            `json:"manifestRef"`
-	ManifestSHA256  string            `json:"manifestSha256"`
-	Manifest        json.RawMessage   `json:"manifest,omitempty"`
-	Artifacts       []AppArtifact     `json:"artifacts"`
+	Chart           *AppVersionChart  `json:"chart,omitempty"`
+	Images          []AppImageRef     `json:"images"`
+	Models          []string          `json:"models"`
+	Capabilities    []string          `json:"capabilities"`
 	Dependencies    []AppDependency   `json:"dependencies"`
-	Permissions     []AppPermission   `json:"permissions"`
-	Validation      []ValidationCheck `json:"validation"`
-	Status          string            `json:"status"`
+	Compatibility   AppCompatibility  `json:"compatibility"`
+	ReleaseNotes    string            `json:"releaseNotes"`
+	Logo            *LogoRef          `json:"logo"`
+	SourceRevision  string            `json:"sourceRevision"`
+	VerifiedAt      string            `json:"verifiedAt,omitempty"`
+	UpstreamVersion string            `json:"upstreamVersion,omitempty"`
+	Publisher       string            `json:"publisher,omitempty"`
+	SourceURL       string            `json:"sourceUrl,omitempty"`
+	LicenseID       string            `json:"licenseId,omitempty"`
+	LicenseURL      string            `json:"licenseUrl,omitempty"`
+	ManifestRef     string            `json:"manifestRef,omitempty"`
+	ManifestSHA256  string            `json:"manifestSha256,omitempty"`
+	Manifest        json.RawMessage   `json:"manifest,omitempty"`
+	Artifacts       []AppArtifact     `json:"artifacts,omitempty"`
+	Permissions     []AppPermission   `json:"permissions,omitempty"`
+	Validation      []ValidationCheck `json:"validation,omitempty"`
+	Status          string            `json:"status,omitempty"`
 	CreatedAt       time.Time         `json:"createdAt"`
 }
 
@@ -343,12 +423,14 @@ type AppArtifact struct {
 }
 
 type AppDependency struct {
-	Kind      string `json:"kind"`
-	ID        string `json:"id"`
-	Version   string `json:"version"`
-	SourceURL string `json:"sourceUrl"`
-	LicenseID string `json:"licenseId"`
-	SHA256    string `json:"sha256"`
+	AppID        string `json:"appId,omitempty"`
+	VersionRange string `json:"versionRange,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+	ID           string `json:"id,omitempty"`
+	Version      string `json:"version,omitempty"`
+	SourceURL    string `json:"sourceUrl,omitempty"`
+	LicenseID    string `json:"licenseId,omitempty"`
+	SHA256       string `json:"sha256,omitempty"`
 }
 
 type AppPermission struct {

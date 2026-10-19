@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  VERSION: ${{ github.ref == 'refs/heads/dev' && 'service-control-v1.7.2-dev.1' || 'service-control-v1.7.2' }}
+  VERSION: ${{ github.ref == 'refs/heads/dev' && 'service-control-v1.7.3-dev.1' || 'service-control-v1.7.3' }}
 
 concurrency:
   group: verdantflare-service-control-release
@@ -116,7 +116,7 @@ jobs:
           kubectl --context verdantflare -n verdantflare get secret login-directory-bridge -o json \
             | jq -e '(.data.TOKEN // "") != ""' >/dev/null
           kubectl --context verdantflare -n verdantflare patch deployment verdantflare-service-control --type strategic \
-            -p '{"spec":{"template":{"spec":{"containers":[{"name":"verdantflare-service-control","env":[{"name":"CONTROL_LOGIN_DIRECTORY_BASE_URL","value":"http://verdantflare-login-api.verdantflare.svc.cluster.local:8088"},{"name":"CONTROL_LOGIN_DIRECTORY_TOKEN","valueFrom":{"secretKeyRef":{"name":"login-directory-bridge","key":"TOKEN"}}}]}]}}}}'
+            -p '{"spec":{"template":{"spec":{"containers":[{"name":"verdantflare-service-control","env":[{"name":"CONTROL_ALLOWED_ORIGINS","value":"https://hub.verdantflarehub.com,https://hub.verdantflare.ai"},{"name":"CONTROL_CHART_REGISTRY_HOST","value":"registry.verdantflare.ai"},{"name":"CONTROL_CHART_REGISTRY_INTERNAL_URL","value":"http://registry.verdantflare.svc.cluster.local:8080"},{"name":"CONTROL_LOGIN_DIRECTORY_BASE_URL","value":"http://verdantflare-login-api.verdantflare.svc.cluster.local:8088"},{"name":"CONTROL_LOGIN_DIRECTORY_TOKEN","valueFrom":{"secretKeyRef":{"name":"login-directory-bridge","key":"TOKEN"}}}]}]}}}}'
           kubectl --context verdantflare -n verdantflare rollout status deployment/verdantflare-service-control --timeout=5m
           image="registry.cn-qingdao.aliyuncs.com/wod/verdantflare:${VERSION}"
           kubectl --context verdantflare -n verdantflare set image deployment/verdantflare-service-control verdantflare-service-control="$image"

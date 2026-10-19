@@ -15,28 +15,36 @@ import (
 var appIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
 
 type ManagedAppInput struct {
-	ID            string              `json:"id"`
-	Name          string              `json:"name"`
-	GroupID       string              `json:"groupId"`
-	SortOrder     int                 `json:"sortOrder"`
-	Brand         string              `json:"brand"`
-	IconRef       string              `json:"iconRef"`
-	Category      string              `json:"category"`
-	Summary       string              `json:"summary"`
-	Version       string              `json:"version"`
-	GPU           string              `json:"gpu"`
-	Duration      string              `json:"duration"`
-	Icon          string              `json:"icon"`
-	Tone          string              `json:"tone"`
-	Channel       string              `json:"channel"`
-	Developer     string              `json:"developer"`
-	Description   string              `json:"description"`
-	Memory        string              `json:"memory"`
-	Disk          string              `json:"disk"`
-	CPU           string              `json:"cpu"`
-	PublicIconURL string              `json:"publicIconUrl"`
-	PublicVisible bool                `json:"publicVisible"`
-	Showcase      *domain.AppShowcase `json:"showcase"`
+	ID               string              `json:"id"`
+	Name             string              `json:"name"`
+	GroupID          string              `json:"groupId"`
+	SortOrder        int                 `json:"sortOrder"`
+	Brand            string              `json:"brand"`
+	IconRef          string              `json:"iconRef"`
+	Visibility       string              `json:"visibility"`
+	Enabled          *bool               `json:"enabled"`
+	DisabledReason   string              `json:"disabledReason"`
+	PublishedVersion string              `json:"publishedVersion"`
+	Models           []string            `json:"models"`
+	Capabilities     []string            `json:"capabilities"`
+	Images           []domain.AppImageRef `json:"images"`
+	Logo             *domain.LogoRef     `json:"logo"`
+	Category         string              `json:"category"`
+	Summary          string              `json:"summary"`
+	Version          string              `json:"version"`
+	GPU              string              `json:"gpu"`
+	Duration         string              `json:"duration"`
+	Icon             string              `json:"icon"`
+	Tone             string              `json:"tone"`
+	Channel          string              `json:"channel"`
+	Developer        string              `json:"developer"`
+	Description      string              `json:"description"`
+	Memory           string              `json:"memory"`
+	Disk             string              `json:"disk"`
+	CPU              string              `json:"cpu"`
+	PublicIconURL    string              `json:"publicIconUrl"`
+	PublicVisible    bool                `json:"publicVisible"`
+	Showcase         *domain.AppShowcase `json:"showcase"`
 }
 
 type CreateManagedOrganizationInput struct {
@@ -82,13 +90,16 @@ func validateManagedApp(input ManagedAppInput) error {
 	if input.GroupID != "" && !slices.Contains([]string{"image", "music", "video", "desktop", "system", "channel", "agent"}, input.GroupID) {
 		return domain.NewError(400, "app_group_invalid", "应用分组须为 image、music、video、desktop、system、channel 或 agent")
 	}
+	if input.Visibility != "" && !slices.Contains([]string{"hidden", "listed"}, input.Visibility) {
+		return domain.NewError(400, "visibility_invalid", "visibility 须为 hidden 或 listed")
+	}
 	if input.SortOrder < 0 || input.SortOrder > 1000000 {
 		return domain.NewError(400, "app_sort_order_invalid", "应用排序须为 0 至 1000000 的整数")
 	}
-	if slices.Contains([]string{"Preview", "Stable"}, input.Channel) && strings.TrimSpace(input.Version) == "" {
+	if slices.Contains([]string{"Preview", "Stable"}, input.Channel) && strings.TrimSpace(input.Version) == "" && strings.TrimSpace(input.PublishedVersion) == "" {
 		return domain.NewError(400, "app_version_required", "公开或预览应用的目录版本不能为空；资料草稿可以留空")
 	}
-	if input.Channel == "Listed" && strings.TrimSpace(input.Version) != "" {
+	if input.Channel == "Listed" && strings.TrimSpace(input.Version) != "" && strings.TrimSpace(input.DisabledReason) == "" {
 		return domain.NewError(400, "listed_app_version_forbidden", "仅资料上架的应用不得声明交付包版本")
 	}
 	if input.PublicIconURL != "" {
@@ -119,7 +130,7 @@ func validateManagedApp(input ManagedAppInput) error {
 			return domain.NewError(400, "showcase_highlight_invalid", "功能亮点不能为空")
 		}
 	}
-	if input.Channel == "Listed" {
+	if input.Channel == "Listed" && (input.GroupID == "" || input.GroupID == "agent") {
 		if strings.TrimSpace(input.Category) == "" || strings.TrimSpace(input.Summary) == "" || strings.TrimSpace(input.Developer) == "" || strings.TrimSpace(input.Description) == "" || len(showcase.Screenshots) == 0 || len(showcase.Highlights) == 0 {
 			return domain.NewError(400, "listing_incomplete", "上架 Hub 目录须填写分类、简介、开发者、应用介绍、至少一张截图及一条功能亮点")
 		}
@@ -139,7 +150,52 @@ func appFromInput(input ManagedAppInput) domain.App {
 	if tone == "" {
 		tone = "mint"
 	}
-	return domain.App{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), GroupID: input.GroupID, SortOrder: input.SortOrder, Brand: strings.TrimSpace(input.Brand), IconRef: strings.TrimSpace(input.IconRef), Category: strings.TrimSpace(input.Category), Summary: strings.TrimSpace(input.Summary), Version: strings.TrimSpace(input.Version), GPU: strings.TrimSpace(input.GPU), Duration: strings.TrimSpace(input.Duration), Icon: icon, Tone: tone, Channel: input.Channel, Developer: strings.TrimSpace(input.Developer), Description: strings.TrimSpace(input.Description), Memory: strings.TrimSpace(input.Memory), Disk: strings.TrimSpace(input.Disk), CPU: strings.TrimSpace(input.CPU), PublicIconURL: strings.TrimSpace(input.PublicIconURL), PublicVisible: input.PublicVisible, Showcase: showcase}
+	enabled := false
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+	visibility := strings.TrimSpace(input.Visibility)
+	if visibility == "" {
+		if slices.Contains([]string{"Listed", "Preview", "Stable"}, input.Channel) {
+			visibility = "listed"
+		} else {
+			visibility = "hidden"
+		}
+	}
+	id := strings.TrimSpace(input.ID)
+	return domain.App{
+		ID:               id,
+		AppID:            id,
+		Name:             strings.TrimSpace(input.Name),
+		GroupID:          input.GroupID,
+		SortOrder:        input.SortOrder,
+		Brand:            strings.TrimSpace(input.Brand),
+		IconRef:          strings.TrimSpace(input.IconRef),
+		Visibility:       visibility,
+		Enabled:          enabled,
+		DisabledReason:   strings.TrimSpace(input.DisabledReason),
+		PublishedVersion: strings.TrimSpace(input.PublishedVersion),
+		Models:           slices.Clone(input.Models),
+		Capabilities:     slices.Clone(input.Capabilities),
+		Images:           slices.Clone(input.Images),
+		Logo:             input.Logo,
+		Category:         strings.TrimSpace(input.Category),
+		Summary:          strings.TrimSpace(input.Summary),
+		Version:          strings.TrimSpace(input.Version),
+		GPU:              strings.TrimSpace(input.GPU),
+		Duration:         strings.TrimSpace(input.Duration),
+		Icon:             icon,
+		Tone:             tone,
+		Channel:          input.Channel,
+		Developer:        strings.TrimSpace(input.Developer),
+		Description:      strings.TrimSpace(input.Description),
+		Memory:           strings.TrimSpace(input.Memory),
+		Disk:             strings.TrimSpace(input.Disk),
+		CPU:              strings.TrimSpace(input.CPU),
+		PublicIconURL:    strings.TrimSpace(input.PublicIconURL),
+		PublicVisible:    input.PublicVisible,
+		Showcase:         showcase,
+	}
 }
 
 func (s *Service) CreateManagedApp(ctx context.Context, subject string, input ManagedAppInput) (domain.ManagedApp, error) {
@@ -182,6 +238,31 @@ func (s *Service) UpdateManagedApp(ctx context.Context, subject, id string, inpu
 	if input.Showcase == nil {
 		input.Showcase = &current.App.Showcase
 	}
+	if input.Enabled == nil {
+		enabled := current.App.Enabled
+		input.Enabled = &enabled
+	}
+	if input.DisabledReason == "" && !*input.Enabled {
+		input.DisabledReason = current.App.DisabledReason
+	}
+	if input.PublishedVersion == "" {
+		input.PublishedVersion = current.App.PublishedVersion
+	}
+	if input.Models == nil {
+		input.Models = current.App.Models
+	}
+	if input.Capabilities == nil {
+		input.Capabilities = current.App.Capabilities
+	}
+	if input.Images == nil {
+		input.Images = current.App.Images
+	}
+	if input.Logo == nil {
+		input.Logo = current.App.Logo
+	}
+	if input.Channel == "Listed" && current.App.GroupID != "" && current.App.GroupID != "agent" && input.Version == current.App.Version && input.DisabledReason == "" {
+		input.DisabledReason = "当前应用资料仅目录展示，尚未发布可安装的 Chart OCI 版本"
+	}
 	if err := validateManagedApp(input); err != nil {
 		return domain.ManagedApp{}, err
 	}
@@ -190,9 +271,21 @@ func (s *Service) UpdateManagedApp(ctx context.Context, subject, id string, inpu
 	}
 	if current.App.GroupID != "" {
 		if !slices.Contains([]string{"Preview", "Stable"}, current.App.Channel) && slices.Contains([]string{"Preview", "Stable"}, input.Channel) {
-			return domain.ManagedApp{}, domain.NewError(409, "release_evidence_missing", "Chart 预检不能发布应用；须先接入可信制品、隔离渲染及目标 Station 验证证据")
+			targetVer := strings.TrimSpace(input.PublishedVersion)
+			if targetVer == "" {
+				targetVer = strings.TrimSpace(input.Version)
+			}
+			verRecord, verErr := s.repository.AppVersion(ctx, id, targetVer)
+			if verErr != nil || verRecord.Chart == nil || current.App.GroupID == "agent" {
+				return domain.ManagedApp{}, domain.NewError(409, "release_evidence_missing", "Chart 预检不能发布应用；须先接入可信制品、隔离渲染及目标 Station 验证证据")
+			}
+			input.PublishedVersion = verRecord.Version
+			input.Version = verRecord.Version
+			t := true
+			input.Enabled = &t
+			input.DisabledReason = ""
 		}
-		if input.Version != "" {
+		if input.Version != "" && input.Version != current.App.Version {
 			if _, err := s.repository.AppVersion(ctx, id, input.Version); err != nil {
 				return domain.ManagedApp{}, domain.NewError(409, "app_version_not_registered", "目录版本必须选择已登记的候选版本")
 			}

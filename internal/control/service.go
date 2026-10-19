@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"net/mail"
 	"regexp"
 	"slices"
@@ -20,12 +21,15 @@ import (
 )
 
 type Service struct {
-	repository     store.Repository
-	modelGateway   ModelGateway
-	accountGateway GatewayAccounts
-	loginDirectory LoginDirectory
-	modelRunSlots  chan struct{}
-	now            func() time.Time
+	repository        store.Repository
+	modelGateway      ModelGateway
+	accountGateway    GatewayAccounts
+	loginDirectory    LoginDirectory
+	chartRegistryHost string
+	chartRegistryURL  string
+	chartHTTPClient   *http.Client
+	modelRunSlots     chan struct{}
+	now               func() time.Time
 }
 
 type ModelGateway interface {
@@ -54,10 +58,42 @@ type LoginDirectory interface {
 
 func (s *Service) SetLoginDirectory(directory LoginDirectory) { s.loginDirectory = directory }
 
+func (s *Service) SetChartRegistry(host, baseURL string, client *http.Client) {
+	if trimmed := strings.TrimSpace(host); trimmed != "" {
+		s.chartRegistryHost = trimmed
+	}
+	if trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/"); trimmed != "" {
+		s.chartRegistryURL = trimmed
+	}
+	if client != nil {
+		s.chartHTTPClient = client
+	}
+}
+
+func (s *Service) SetChartRegistryDefaults(host, baseURL string) {
+	if s.chartRegistryHost == "" || s.chartRegistryHost == "registry.verdantflare.ai" {
+		if trimmed := strings.TrimSpace(host); trimmed != "" {
+			s.chartRegistryHost = trimmed
+		}
+	}
+	if s.chartRegistryURL == "" || s.chartRegistryURL == "https://registry.verdantflare.ai" {
+		if trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/"); trimmed != "" {
+			s.chartRegistryURL = trimmed
+		}
+	}
+}
+
 var gatewayRequestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,80}$`)
 
 func NewService(repository store.Repository, gateways ...ModelGateway) *Service {
-	service := &Service{repository: repository, modelRunSlots: make(chan struct{}, 4), now: func() time.Time { return time.Now().UTC() }}
+	service := &Service{
+		repository:        repository,
+		chartRegistryHost: "registry.verdantflare.ai",
+		chartRegistryURL:  "https://registry.verdantflare.ai",
+		chartHTTPClient:   &http.Client{Timeout: 15 * time.Second},
+		modelRunSlots:     make(chan struct{}, 4),
+		now:               func() time.Time { return time.Now().UTC() },
+	}
 	if len(gateways) > 0 {
 		service.modelGateway = gateways[0]
 	}

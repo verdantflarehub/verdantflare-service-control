@@ -22,13 +22,16 @@ type Config struct {
 	DevLoginSubject       string
 	TrustAuthHeaders      bool
 	AllowedOrigins        []string
-	StationMTLSAddress    string
-	StationMTLSCAFile     string
-	StationMTLSCertFile   string
-	StationMTLSKeyFile    string
-	ReadTimeout           time.Duration
-	WriteTimeout          time.Duration
-	ShutdownTimeout       time.Duration
+	StationMTLSAddress       string
+	StationMTLSCAFile        string
+	StationMTLSCertFile      string
+	StationMTLSKeyFile       string
+	StationCatalogToken      string
+	ChartRegistryHost        string
+	ChartRegistryInternalURL string
+	ReadTimeout              time.Duration
+	WriteTimeout             time.Duration
+	ShutdownTimeout          time.Duration
 }
 
 func Load() (Config, error) {
@@ -86,28 +89,33 @@ func Load() (Config, error) {
 	if stationAddress != "" && stationAddress == env("CONTROL_ADDRESS", ":8080") {
 		return Config{}, fmt.Errorf("CONTROL_STATION_MTLS_ADDRESS must differ from CONTROL_ADDRESS")
 	}
+	chartRegistryHost := env("CONTROL_CHART_REGISTRY_HOST", "registry.verdantflare.ai")
+	chartRegistryInternalURL := env("CONTROL_CHART_REGISTRY_INTERNAL_URL", "https://"+chartRegistryHost)
 
 	return Config{
-		Environment:           environment,
-		Address:               env("CONTROL_ADDRESS", ":8080"),
-		DatabaseURL:           databaseURL,
-		DatabaseMaxOpen:       positiveInt("CONTROL_DATABASE_MAX_OPEN", 5),
-		DatabaseMaxIdle:       positiveInt("CONTROL_DATABASE_MAX_IDLE", 2),
-		GatewayBaseURL:        gatewayBaseURL,
-		GatewayToken:          gatewayToken,
-		GatewayAdminToken:     gatewayAdminToken,
-		LoginDirectoryBaseURL: loginDirectoryBaseURL,
-		LoginDirectoryToken:   loginDirectoryToken,
-		DevLoginSubject:       devSubject,
-		TrustAuthHeaders:      trustHeaders,
-		AllowedOrigins:        splitCSV(os.Getenv("CONTROL_ALLOWED_ORIGINS")),
-		StationMTLSAddress:    stationAddress,
-		StationMTLSCAFile:     stationCAFile,
-		StationMTLSCertFile:   stationCertFile,
-		StationMTLSKeyFile:    stationKeyFile,
-		ReadTimeout:           10 * time.Second,
-		WriteTimeout:          15 * time.Second,
-		ShutdownTimeout:       10 * time.Second,
+		Environment:              environment,
+		Address:                  env("CONTROL_ADDRESS", ":8080"),
+		DatabaseURL:              databaseURL,
+		DatabaseMaxOpen:          positiveInt("CONTROL_DATABASE_MAX_OPEN", 5),
+		DatabaseMaxIdle:          positiveInt("CONTROL_DATABASE_MAX_IDLE", 2),
+		GatewayBaseURL:           gatewayBaseURL,
+		GatewayToken:             gatewayToken,
+		GatewayAdminToken:        gatewayAdminToken,
+		LoginDirectoryBaseURL:    loginDirectoryBaseURL,
+		LoginDirectoryToken:      loginDirectoryToken,
+		DevLoginSubject:          devSubject,
+		TrustAuthHeaders:         trustHeaders,
+		AllowedOrigins:           splitCSV(os.Getenv("CONTROL_ALLOWED_ORIGINS")),
+		StationMTLSAddress:       stationAddress,
+		StationMTLSCAFile:        stationCAFile,
+		StationMTLSCertFile:      stationCertFile,
+		StationMTLSKeyFile:       stationKeyFile,
+		StationCatalogToken:      strings.TrimSpace(os.Getenv("CONTROL_STATION_CATALOG_TOKEN")),
+		ChartRegistryHost:        chartRegistryHost,
+		ChartRegistryInternalURL: chartRegistryInternalURL,
+		ReadTimeout:              10 * time.Second,
+		WriteTimeout:             15 * time.Second,
+		ShutdownTimeout:          10 * time.Second,
 	}, nil
 }
 

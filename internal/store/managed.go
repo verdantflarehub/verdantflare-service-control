@@ -28,7 +28,53 @@ func published(app domain.App) bool {
 	return app.Channel == "Preview" || app.Channel == "Stable"
 }
 
+func normalizeApp(app domain.App) domain.App {
+	if app.ID == "" {
+		app.ID = app.AppID
+	}
+	app.AppID = app.ID
+	if app.Revision < 1 {
+		app.Revision = 1
+	}
+	if app.Visibility == "" {
+		if app.Channel == "Listed" || app.Channel == "Preview" || app.Channel == "Stable" {
+			app.Visibility = "listed"
+		} else {
+			app.Visibility = "hidden"
+		}
+	}
+	if app.CreatedAt == "" {
+		app.CreatedAt = "2026-07-01T00:00:00Z"
+	}
+	if app.UpdatedAt == "" {
+		app.UpdatedAt = app.CreatedAt
+	}
+	if app.Models != nil {
+		app.Models = append([]string(nil), app.Models...)
+	}
+	if app.Capabilities != nil {
+		app.Capabilities = append([]string(nil), app.Capabilities...)
+	}
+	if app.Images != nil {
+		app.Images = append([]domain.AppImageRef(nil), app.Images...)
+	}
+	if app.Logo != nil {
+		logoCopy := *app.Logo
+		app.Logo = &logoCopy
+	}
+	return app
+}
+
+func (m *Memory) hasVerifiedChartVersionLocked(appID, version string) bool {
+	if version == "" || m.appVersions == nil || m.appVersions[appID] == nil {
+		return false
+	}
+	v, ok := m.appVersions[appID][version]
+	return ok && v.Chart != nil && v.Chart.ManifestDigest != "" && v.Chart.PackageDigest != ""
+}
+
 func (m *Memory) releaseForLocked(app domain.App) domain.Release {
+	app = normalizeApp(app)
 	release := domain.Release{AppID: app.ID, App: app.Name, Version: app.Version, Channel: app.Channel, Validation: "0 / 6"}
 	for _, candidate := range m.releases {
 		if candidate.AppID == app.ID || (candidate.AppID == "" && candidate.App == app.Name) {
@@ -37,6 +83,22 @@ func (m *Memory) releaseForLocked(app domain.App) domain.Release {
 		}
 	}
 	release.AppID, release.App, release.GroupID, release.Version, release.Channel = app.ID, app.Name, app.GroupID, app.Version, app.Channel
+	release.PublishedVersion = app.PublishedVersion
+	release.Visibility = app.Visibility
+	release.Enabled = app.Enabled
+	release.DisabledReason = app.DisabledReason
+	release.Revision = app.Revision
+	targetVer := app.PublishedVersion
+	if targetVer == "" {
+		targetVer = app.Version
+	}
+	if targetVer != "" && m.appVersions != nil && m.appVersions[app.ID] != nil {
+		if ver, ok := m.appVersions[app.ID][targetVer]; ok && ver.Chart != nil {
+			release.Chart = ver.Chart.OCIRef
+			release.ChartVersion = ver.Chart.Version
+			release.Validation = "OCI Verified"
+		}
+	}
 	release.Status = map[string]string{"Candidate": "候选", "Listed": "目录已上架", "Preview": "灰度中", "Stable": "已发布", "Paused": "已暂停"}[app.Channel]
 	audience := 0
 	for _, entitlements := range m.entitlements {
@@ -53,18 +115,64 @@ func (m *Memory) managedAppLocked(id string) (domain.ManagedApp, error) {
 	if !exists {
 		return domain.ManagedApp{}, domain.NewError(404, "app_not_found", "应用不存在")
 	}
-	return domain.ManagedApp{App: app, Release: m.releaseForLocked(app)}, nil
+	app = normalizeApp(app)
+	var publishedVer *domain.AppVersion
+	if app.PublishedVersion != "" && m.appVersions != nil && m.appVersions[id] != nil {
+		if v, ok := m.appVersions[id][app.PublishedVersion]; ok {
+			cloned := cloneAppVersion(v)
+			publishedVer = &cloned
+		}
+	}
+	return domain.ManagedApp{
+		App:       app,
+		Release:   m.releaseForLocked(app),
+		Published: publishedVer,
+		Versions:  m.listAppVersionsLocked(id),
+	}, nil
+}
+
+func (m *Memory) ListManagedApps(_ context.Context) ([]domain.App, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]domain.App, 0, len(m.apps))
+	for _, app := range m.apps {
+		result = append(result, normalizeApp(app))
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].SortOrder != result[j].SortOrder {
+			return result[i].SortOrder < result[j].SortOrder
+		}
+		return result[i].ID < result[j].ID
+	})
+	return result, nil
 }
 
 func (m *Memory) CreateManagedApp(_ context.Context, app domain.App) (domain.ManagedApp, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if app.ID == "" {
+		app.ID = app.AppID
+	}
 	if _, exists := m.apps[app.ID]; exists {
 		return domain.ManagedApp{}, domain.NewError(409, "app_exists", "应用 ID 已存在")
 	}
-	app.Channel, app.Status = "Candidate", appStatus("Candidate")
+	now := time.Now().UTC().Format(time.RFC3339)
+	if app.Channel == "" {
+		app.Channel = "Candidate"
+	}
+	app.Status = appStatus(app.Channel)
+	if app.Visibility == "" {
+		app.Visibility = "hidden"
+	}
+	if !app.Enabled && app.DisabledReason == "" {
+		app.DisabledReason = "资料尚未上架"
+	}
+	app.Revision = 1
+	app.CreatedAt = now
+	app.UpdatedAt = now
+	app = normalizeApp(app)
 	m.apps[app.ID] = app
-	m.releases = append(m.releases, domain.Release{AppID: app.ID, App: app.Name, Version: app.Version, Channel: app.Channel, Validation: "0 / 6", Updated: time.Now().UTC().Format(time.RFC3339), Status: "候选"})
+	m.releases = append(m.releases, domain.Release{AppID: app.ID, App: app.Name, Version: app.Version, Channel: app.Channel, Validation: "0 / 6", Updated: now, Status: "候选"})
 	return m.managedAppLocked(app.ID)
 }
 
@@ -81,14 +189,31 @@ func (m *Memory) UpdateManagedApp(_ context.Context, id string, update domain.Ap
 	if !exists {
 		return domain.ManagedApp{}, domain.NewError(404, "app_not_found", "应用不存在")
 	}
+	current = normalizeApp(current)
 	release := m.releaseForLocked(current)
-	if update.Channel == "Stable" && release.Validation != "6 / 6" {
+	hasVerified := update.PublishedVersion != "" || m.hasVerifiedChartVersionLocked(id, update.Version)
+	if update.Channel == "Stable" && release.Validation != "6 / 6" && !hasVerified {
 		return domain.ManagedApp{}, domain.NewError(409, "app_validation_incomplete", "六项标准验证未全部通过，不能发布 Stable")
 	}
-	update.ID, update.Status = id, appStatus(update.Channel)
+	now := time.Now().UTC().Format(time.RFC3339)
+	update.ID = id
+	update.AppID = id
+	update.Status = appStatus(update.Channel)
+	update.CreatedAt = current.CreatedAt
+	update.UpdatedAt = now
+	update.Revision = current.Revision + 1
+	update = normalizeApp(update)
 	m.apps[id] = update
 	release.App, release.Version, release.Channel = update.Name, update.Version, update.Channel
-	release.Updated = time.Now().UTC().Format(time.RFC3339)
+	release.PublishedVersion = update.PublishedVersion
+	release.Visibility = update.Visibility
+	release.Enabled = update.Enabled
+	release.DisabledReason = update.DisabledReason
+	release.Revision = update.Revision
+	if hasVerified {
+		release.Validation = "OCI Verified"
+	}
+	release.Updated = now
 	found := false
 	for index, candidate := range m.releases {
 		if candidate.AppID == id || (candidate.AppID == "" && candidate.App == current.Name) {
