@@ -448,7 +448,7 @@ func (s *Service) MarketAppsYAML(ctx context.Context, organizationID string, sta
 			Images:       images,
 		}
 
-		distributable := pubVer != nil && (app.Enabled || app.PublishedVersion != "") && strings.TrimSpace(app.DisabledReason) == ""
+		distributable := pubVer != nil && stationReleaseVisible(app) && pubVer.Version == stationCurrentVersion(app)
 		// Station only receives a release that has passed chart verification and is enabled for distribution.
 		if stationFeed && !distributable {
 			continue
@@ -502,10 +502,9 @@ func (s *Service) StationAppVersionV2(ctx context.Context, appID, version string
 	if err != nil {
 		return domain.AppVersion{}, err
 	}
-	isListed := managed.App.Visibility == "listed" || slices.Contains([]string{"Listed", "Preview", "Stable"}, managed.App.Channel)
-	hasRelease := strings.TrimSpace(managed.App.PublishedVersion) != "" ||
-		(strings.TrimSpace(managed.App.Version) != "" && slices.Contains([]string{"Preview", "Stable"}, managed.App.Channel))
-	if !isListed || !managed.App.Enabled || strings.TrimSpace(managed.App.DisabledReason) != "" || !hasRelease {
+	// Historical verified versions remain readable for already installed clients;
+	// only the grant endpoint restricts new installs to the current pointer.
+	if !stationReleaseVisible(managed.App) || stationCurrentVersion(managed.App) == "" {
 		return domain.AppVersion{}, domain.NewError(404, "app_not_found", "应用未上架或不在可见范围")
 	}
 	ver, err := s.repository.AppVersion(ctx, appID, version)

@@ -91,6 +91,30 @@ func (s *Service) PublishRegisteredOCI(ctx context.Context, subject string, inpu
 	if input.Version.Chart.PackageDigest == "" || input.Version.Chart.ManifestDigest == "" {
 		return StudioPublicationResult{}, domain.NewError(422, "CHART_DIGEST_REQUIRED", "须提供已发行 OCI Chart 的双摘要")
 	}
+	// Reject deterministic listing and artifact input errors before creating a
+	// managed app. OCI readback can still fail later; the caller then resumes
+	// against the persisted revision instead of assuming another create.
+	preview := domain.App{ID: input.AppID, Name: input.Name, Category: input.Category, Summary: input.Summary, Description: input.Description, Developer: input.Developer}
+	if input.PublicIconURL != nil {
+		preview.PublicIconURL = *input.PublicIconURL
+	}
+	if input.Showcase != nil {
+		preview.Showcase = *input.Showcase
+	}
+	if err := validateEditorialFields(preview); err != nil {
+		return StudioPublicationResult{}, err
+	}
+	if readiness := publicationReadiness(preview); !readiness.Ready {
+		return StudioPublicationResult{}, domain.NewError(422, "LISTING_INCOMPLETE", "发布资料不完整："+strings.Join(readiness.MissingFields, ", "))
+	}
+	if !chartVersionPattern.MatchString(strings.TrimSpace(input.Version.Version)) || !chartVersionPattern.MatchString(strings.TrimSpace(input.Version.Chart.Version)) ||
+		!imageDigestPattern.MatchString(strings.ToLower(strings.TrimSpace(input.Version.Chart.ManifestDigest))) || !imageDigestPattern.MatchString(strings.ToLower(strings.TrimSpace(input.Version.Chart.PackageDigest))) {
+		return StudioPublicationResult{}, domain.NewError(422, "CHART_DIGEST_INVALID", "发行版本、Chart 版本或摘要格式无效")
+	}
+	expectedOCIRef := "oci://" + s.chartRegistryHost + "/charts/" + input.AppID
+	if strings.TrimSpace(input.Version.Chart.OCIRef) != expectedOCIRef {
+		return StudioPublicationResult{}, domain.NewError(422, "CHART_OCI_REF_INVALID", "Chart OCI 引用必须指向受控 Registry 中同名应用")
+	}
 	seen := map[string]bool{}
 	for _, organizationID := range input.OrganizationIDs {
 		if organizationID == "" || seen[organizationID] {
@@ -110,6 +134,9 @@ func (s *Service) PublishRegisteredOCI(ctx context.Context, subject string, inpu
 		}
 		if managed.App.GroupID != input.GroupID {
 			return StudioPublicationResult{}, domain.NewError(409, "APP_GROUP_IMMUTABLE", "已登记应用的分组不能修改")
+		}
+		if managed.App.PublishedVersion != "" && managed.App.PublishedVersion != input.Version.Version && strings.TrimSpace(input.Version.ReleaseNotes) == "" {
+			return StudioPublicationResult{}, domain.NewError(422, "RELEASE_NOTES_REQUIRED", "替换已发布版本须提供更新说明")
 		}
 		app = managed.App
 	} else {
@@ -139,9 +166,6 @@ func (s *Service) PublishRegisteredOCI(ctx context.Context, subject string, inpu
 	}
 	if readiness := publicationReadiness(app); !readiness.Ready {
 		return StudioPublicationResult{}, domain.NewError(422, "LISTING_INCOMPLETE", "发布资料不完整："+strings.Join(readiness.MissingFields, ", "))
-	}
-	if app.PublishedVersion != "" && app.PublishedVersion != input.Version.Version && strings.TrimSpace(input.Version.ReleaseNotes) == "" {
-		return StudioPublicationResult{}, domain.NewError(422, "RELEASE_NOTES_REQUIRED", "替换已发布版本须提供更新说明")
 	}
 	version, _, err := s.CreateOCIAppVersion(ctx, subject, input.AppID, input.Version)
 	if err != nil {

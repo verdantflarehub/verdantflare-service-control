@@ -43,3 +43,25 @@ func TestStationInstallGrantRequiresCurrentOrganizationRight(t *testing.T) {
 		t.Fatal("old release allowed")
 	}
 }
+
+func TestStationInstallGrantRejectsDisabledLegacyRelease(t *testing.T) {
+	ctx := context.Background()
+	repo := store.NewMemorySeeded(time.Date(2026, 7, 19, 8, 0, 0, 0, time.UTC))
+	for _, app := range []domain.App{
+		{ID: "legacy-disabled", Name: "Legacy Disabled", GroupID: "desktop", Channel: "Stable", Visibility: "listed", Version: "1.0.0", Enabled: false},
+		{ID: "legacy-reason", Name: "Legacy Reason", GroupID: "desktop", Channel: "Stable", Visibility: "listed", Version: "1.0.0", Enabled: true, DisabledReason: "paused"},
+	} {
+		if _, err := repo.CreateManagedApp(ctx, app); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := NewService(repo)
+	for _, appID := range []string{"legacy-disabled", "legacy-reason"} {
+		if _, err := service.StationInstallGrant(ctx, appID, "1.0.0", "org_verdantflare"); err == nil {
+			t.Fatalf("disabled legacy release %s received an install grant", appID)
+		}
+		if _, err := service.StationAppVersionV2(ctx, appID, "1.0.0"); err == nil {
+			t.Fatalf("disabled legacy release %s returned version metadata", appID)
+		}
+	}
+}

@@ -22,8 +22,7 @@ func (s *Service) StationInstallGrant(ctx context.Context, appID, version, contr
 		return StationInstallGrant{}, err
 	}
 	app := managed.App
-	legacyRelease := !app.InstallGrantRequired && app.PublishedVersion == "" && app.Version == version && (app.Channel == "Stable" || app.Channel == "Preview")
-	if (!legacyRelease && app.PublishedVersion != version) || (!app.Enabled && !legacyRelease) || app.Visibility != "listed" {
+	if !stationReleaseVisible(app) || stationCurrentVersion(app) == "" || stationCurrentVersion(app) != version {
 		return StationInstallGrant{}, domain.NewError(403, "RELEASE_NOT_INSTALLABLE", "当前版本未开放安装")
 	}
 	result := StationInstallGrant{AppID: appID, Version: version, Required: app.InstallGrantRequired, Allowed: !app.InstallGrantRequired}
@@ -35,7 +34,7 @@ func (s *Service) StationInstallGrant(ctx context.Context, appID, version, contr
 	}
 	org, err := s.repository.ManagedOrganization(ctx, controlOrganizationID)
 	if err != nil {
-		return result, nil
+		return result, err
 	}
 	result.Allowed = org.Organization.Status == "正常" && slices.Contains(org.AppIDs, appID)
 	return result, nil
