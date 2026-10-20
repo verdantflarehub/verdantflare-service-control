@@ -503,12 +503,17 @@ func (s *Service) StationAppVersionV2(ctx context.Context, appID, version string
 		return domain.AppVersion{}, err
 	}
 	isListed := managed.App.Visibility == "listed" || slices.Contains([]string{"Listed", "Preview", "Stable"}, managed.App.Channel)
-	if !isListed {
+	hasRelease := strings.TrimSpace(managed.App.PublishedVersion) != "" ||
+		(strings.TrimSpace(managed.App.Version) != "" && slices.Contains([]string{"Preview", "Stable"}, managed.App.Channel))
+	if !isListed || !managed.App.Enabled || strings.TrimSpace(managed.App.DisabledReason) != "" || !hasRelease {
 		return domain.AppVersion{}, domain.NewError(404, "app_not_found", "应用未上架或不在可见范围")
 	}
 	ver, err := s.repository.AppVersion(ctx, appID, version)
 	if err != nil {
 		return domain.AppVersion{}, err
+	}
+	if ver.Chart == nil || ver.Chart.ManifestDigest == "" || ver.Chart.PackageDigest == "" {
+		return domain.AppVersion{}, domain.NewError(404, "version_not_found", "版本未通过发行校验")
 	}
 	return ver, nil
 }

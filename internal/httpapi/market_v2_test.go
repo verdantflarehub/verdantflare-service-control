@@ -235,10 +235,10 @@ func TestMarketV2OCIChartRegistrationLifecycleAndIdempotency(t *testing.T) {
 	badDigestArt := makeTestOCIArtifact(t, "flux-image", "0.1.4", "0.1.4")
 
 	artifacts := map[string]testOCIRegistryArtifact{
-		"flux-image:0.1.3":                         art,
-		"flux-image:" + art.ManifestDigest:         art,
-		"flux-image:0.9.9":                         mismatchArt,
-		"flux-image:0.1.4":                         badDigestArt,
+		"flux-image:0.1.3":                          art,
+		"flux-image:" + art.ManifestDigest:          art,
+		"flux-image:0.9.9":                          mismatchArt,
+		"flux-image:0.1.4":                          badDigestArt,
 		"flux-image:" + badDigestArt.ManifestDigest: badDigestArt,
 	}
 	blobs := map[string][]byte{
@@ -356,12 +356,16 @@ func TestMarketV2OCIChartRegistrationLifecycleAndIdempotency(t *testing.T) {
 
 func TestMarketV2ReleaseSelectionAndAppsYamlContract(t *testing.T) {
 	art := makeTestOCIArtifact(t, "flux-image", "0.1.3", "0.1.3")
+	previousArt := makeTestOCIArtifact(t, "flux-image", "0.1.2", "0.1.2")
 	artifacts := map[string]testOCIRegistryArtifact{
-		"flux-image:0.1.3":                 art,
-		"flux-image:" + art.ManifestDigest: art,
+		"flux-image:0.1.3":                         art,
+		"flux-image:" + art.ManifestDigest:         art,
+		"flux-image:0.1.2":                         previousArt,
+		"flux-image:" + previousArt.ManifestDigest: previousArt,
 	}
 	blobs := map[string][]byte{
-		"flux-image:" + art.PackageDigest: art.PackageBytes,
+		"flux-image:" + art.PackageDigest:         art.PackageBytes,
+		"flux-image:" + previousArt.PackageDigest: previousArt.PackageBytes,
 	}
 	server := newTestServerWithOCIRegistry(t, artifacts, blobs)
 	createTestAppV2(t, server, "flux-image", "Flux 图像工作台", "image")
@@ -392,6 +396,27 @@ func TestMarketV2ReleaseSelectionAndAppsYamlContract(t *testing.T) {
 	regRes.Body.Close()
 	if regRes.StatusCode != http.StatusCreated {
 		t.Fatalf("register version status = %d", regRes.StatusCode)
+	}
+	previousRegRes := request(t, server, http.MethodPost, "/api/control/ops/v2/apps/flux-image/versions", map[string]any{
+		"version":    "0.1.2",
+		"appVersion": "0.1.2",
+		"chart": map[string]any{
+			"ociRef":         "oci://registry.verdantflare.ai/charts/flux-image",
+			"version":        "0.1.2",
+			"manifestDigest": previousArt.ManifestDigest,
+			"packageDigest":  previousArt.PackageDigest,
+		},
+		"changelog": "历史固定版本",
+	})
+	if previousRegRes.StatusCode != http.StatusCreated {
+		t.Fatalf("register previous version status = %d, body = %s", previousRegRes.StatusCode, readBody(t, previousRegRes))
+	}
+	previousRegRes.Body.Close()
+	versionPath := "/api/control/station/v2/apps/flux-image/versions/0.1.3"
+	beforePublish := request(t, server, http.MethodGet, versionPath, nil)
+	beforePublish.Body.Close()
+	if beforePublish.StatusCode != http.StatusNotFound {
+		t.Fatalf("unpublished version status = %d, want 404", beforePublish.StatusCode)
 	}
 
 	// Get current app and ETag
@@ -425,6 +450,40 @@ func TestMarketV2ReleaseSelectionAndAppsYamlContract(t *testing.T) {
 		t.Fatalf("unexpected published app state: %+v", publishedApp)
 	}
 	newETag := pubRes.Header.Get("ETag")
+	publishedVersion := request(t, server, http.MethodGet, versionPath, nil)
+	if publishedVersion.StatusCode != http.StatusOK {
+		t.Fatalf("published version status = %d, want 200, body = %s", publishedVersion.StatusCode, readBody(t, publishedVersion))
+	}
+	publishedVersion.Body.Close()
+	historicalVersion := request(t, server, http.MethodGet, "/api/control/station/v2/apps/flux-image/versions/0.1.2", nil)
+	if historicalVersion.StatusCode != http.StatusOK {
+		t.Fatalf("historical verified version status = %d, want 200, body = %s", historicalVersion.StatusCode, readBody(t, historicalVersion))
+	}
+	historicalVersion.Body.Close()
+
+	// Pausing an app must also close the fixed-version endpoint, even when the
+	// immutable release record remains available to operations administrators.
+	pauseRes := requestWithHeaders(t, server, http.MethodPatch, "/api/control/ops/v2/apps/flux-image", map[string]any{
+		"enabled": false,
+	}, map[string]string{"If-Match": newETag})
+	if pauseRes.StatusCode != http.StatusOK {
+		t.Fatalf("pause status = %d, body = %s", pauseRes.StatusCode, readBody(t, pauseRes))
+	}
+	newETag = pauseRes.Header.Get("ETag")
+	pauseRes.Body.Close()
+	pausedVersion := request(t, server, http.MethodGet, versionPath, nil)
+	pausedVersion.Body.Close()
+	if pausedVersion.StatusCode != http.StatusNotFound {
+		t.Fatalf("paused version status = %d, want 404", pausedVersion.StatusCode)
+	}
+	resumeRes := requestWithHeaders(t, server, http.MethodPatch, "/api/control/ops/v2/apps/flux-image", map[string]any{
+		"enabled": true,
+	}, map[string]string{"If-Match": newETag})
+	if resumeRes.StatusCode != http.StatusOK {
+		t.Fatalf("resume status = %d, body = %s", resumeRes.StatusCode, readBody(t, resumeRes))
+	}
+	newETag = resumeRes.Header.Get("ETag")
+	resumeRes.Body.Close()
 
 	marketRes := request(t, server, http.MethodGet, "/api/control/market/apps", nil)
 	var marketApps []domain.App
@@ -494,6 +553,11 @@ func TestMarketV2ReleaseSelectionAndAppsYamlContract(t *testing.T) {
 	decode(t, unpubRes, &unpublishedApp)
 	if unpublishedApp.PublishedVersion != "" || unpublishedApp.Enabled || unpublishedApp.DisabledReason == "" {
 		t.Fatalf("expected unpublished app to have empty publishedVersion and non-empty disabledReason, got %+v", unpublishedApp)
+	}
+	afterUnpublish := request(t, server, http.MethodGet, versionPath, nil)
+	afterUnpublish.Body.Close()
+	if afterUnpublish.StatusCode != http.StatusNotFound {
+		t.Fatalf("unpublished version status = %d, want 404", afterUnpublish.StatusCode)
 	}
 	after := request(t, server, http.MethodGet, "/api/control/station/v2/apps.yaml", nil)
 	defer after.Body.Close()
