@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/verdantflarehub/verdantflare-service-control/internal/config"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/control"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/httpapi"
@@ -121,6 +122,10 @@ func makeTestOCIArtifact(t *testing.T, chartName, chartVersion, appVersion strin
 }
 
 func newTestServerWithOCIRegistry(t *testing.T, artifacts map[string]testOCIRegistryArtifact, blobs map[string][]byte) *httptest.Server {
+	return newTestServerWithOCIRegistryConfig(t, testConfig(), artifacts, blobs)
+}
+
+func newTestServerWithOCIRegistryConfig(t *testing.T, cfg config.Config, artifacts map[string]testOCIRegistryArtifact, blobs map[string][]byte) *httptest.Server {
 	t.Helper()
 	regMux := http.NewServeMux()
 	regMux.HandleFunc("GET /v2/charts/{appID}/manifests/{ref}", func(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +155,6 @@ func newTestServerWithOCIRegistry(t *testing.T, artifacts map[string]testOCIRegi
 	regServer := httptest.NewServer(regMux)
 	t.Cleanup(regServer.Close)
 
-	cfg := testConfig()
 	cfg.ChartRegistryHost = "registry.verdantflare.ai"
 	cfg.ChartRegistryInternalURL = regServer.URL
 	service := control.NewService(store.NewMemorySeeded(time.Date(2026, 7, 19, 8, 0, 0, 0, time.UTC)))
