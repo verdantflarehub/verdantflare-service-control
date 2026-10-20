@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/verdantflarehub/verdantflare-service-control/internal/config"
@@ -21,15 +22,17 @@ import (
 const maxBodyBytes = 1 << 20
 
 type Server struct {
-	config  config.Config
-	service *control.Service
-	logger  *slog.Logger
-	handler http.Handler
+	config         config.Config
+	service        *control.Service
+	logger         *slog.Logger
+	handler        http.Handler
+	publishNonceMu sync.Mutex
+	publishNonces  map[string]time.Time
 }
 
 func New(config config.Config, service *control.Service, logger *slog.Logger) *Server {
 	service.SetChartRegistryDefaults(config.ChartRegistryHost, config.ChartRegistryInternalURL)
-	server := &Server{config: config, service: service, logger: logger}
+	server := &Server{config: config, service: service, logger: logger, publishNonces: make(map[string]time.Time)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", server.health)
 	mux.HandleFunc("GET /readyz", server.health)
@@ -102,6 +105,7 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("GET /api/control/ops/v2/apps", server.listManagedAppsV2)
 	mux.HandleFunc("POST /api/control/ops/v2/apps", server.createManagedAppV2)
 	mux.HandleFunc("GET /api/control/ops/v2/apps/{appID}", server.getManagedAppV2)
+	mux.HandleFunc("GET /api/control/ops/v2/apps/{appID}/readiness", server.getAppPublicationReadinessV2)
 	mux.HandleFunc("PATCH /api/control/ops/v2/apps/{appID}", server.patchManagedAppV2)
 	mux.HandleFunc("POST /api/control/ops/v2/apps/{appID}/versions", server.createAppVersionV2)
 	mux.HandleFunc("GET /api/control/ops/v2/apps/{appID}/versions", server.listAppVersionsV2)
@@ -111,6 +115,8 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 
 	mux.HandleFunc("GET /api/control/station/v2/apps.yaml", server.stationAppsYAMLV2)
 	mux.HandleFunc("GET /api/control/station/v2/apps/{appID}/versions/{version}", server.stationAppVersionV2)
+	mux.HandleFunc("GET /api/control/station/v2/apps/{appID}/versions/{version}/install-grant/{organizationID}", server.stationInstallGrantV2)
+	mux.HandleFunc("POST /api/control/internal/studio-publish/mcp", server.studioPublishMCP)
 
 	mux.HandleFunc("POST /api/control/ops/organizations", server.createManagedOrganization)
 	mux.HandleFunc("GET /api/control/ops/organizations/{organizationID}", server.getManagedOrganization)

@@ -189,11 +189,24 @@ func (m *Memory) ManagedApp(_ context.Context, id string) (domain.ManagedApp, er
 func (m *Memory) UpdateManagedApp(_ context.Context, id string, update domain.App) (domain.ManagedApp, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.updateManagedAppLocked(id, update, 0)
+}
+
+func (m *Memory) UpdateManagedAppIfRevision(_ context.Context, id string, update domain.App, expectedRevision int) (domain.ManagedApp, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.updateManagedAppLocked(id, update, expectedRevision)
+}
+
+func (m *Memory) updateManagedAppLocked(id string, update domain.App, expectedRevision int) (domain.ManagedApp, error) {
 	current, exists := m.apps[id]
 	if !exists {
 		return domain.ManagedApp{}, domain.NewError(404, "app_not_found", "应用不存在")
 	}
 	current = normalizeApp(current)
+	if expectedRevision > 0 && current.Revision != expectedRevision {
+		return domain.ManagedApp{}, domain.NewError(409, "APP_REVISION_CHANGED", "应用资料或发布版本已被更新，请刷新后重试")
+	}
 	release := m.releaseForLocked(current)
 	hasVerified := update.PublishedVersion != "" || m.hasVerifiedChartVersionLocked(id, update.Version)
 	if update.Channel == "Stable" && release.Validation != "6 / 6" && !hasVerified {
@@ -325,4 +338,30 @@ func (m *Memory) UpdateManagedOrganization(_ context.Context, id string, update 
 		m.billing[id] = billing
 	}
 	return m.managedOrganizationLocked(id)
+}
+
+// GrantAppToOrganization prepares a grant before the public release pointer is
+// moved. It is used only after the OCI version has been verified by Control.
+func (m *Memory) GrantAppToOrganization(_ context.Context, organizationID, appID string, expectedVersion int) (domain.ManagedOrganization, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	org, ok := m.organizations[organizationID]
+	if !ok || org.Status != "正常" {
+		return domain.ManagedOrganization{}, domain.NewError(422, "organization_unavailable", "目标组织不存在或已冻结")
+	}
+	if _, ok := m.apps[appID]; !ok {
+		return domain.ManagedOrganization{}, domain.NewError(404, "app_not_found", "应用不存在")
+	}
+	if org.EntitlementVersion != expectedVersion {
+		return domain.ManagedOrganization{}, domain.NewError(409, "entitlement_version_conflict", "组织权益已改变，请刷新后重试")
+	}
+	if m.entitlements[organizationID] == nil {
+		m.entitlements[organizationID] = map[string]bool{}
+	}
+	if !m.entitlements[organizationID][appID] {
+		m.entitlements[organizationID][appID] = true
+		org.EntitlementVersion++
+		m.organizations[organizationID] = org
+	}
+	return m.managedOrganizationLocked(organizationID)
 }

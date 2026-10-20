@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -9,29 +10,44 @@ import (
 )
 
 type Config struct {
-	Environment           string
-	Address               string
-	DatabaseURL           string
-	DatabaseMaxOpen       int
-	DatabaseMaxIdle       int
-	GatewayBaseURL        string
-	GatewayToken          string
-	GatewayAdminToken     string
-	LoginDirectoryBaseURL string
-	LoginDirectoryToken   string
-	DevLoginSubject       string
-	TrustAuthHeaders      bool
-	AllowedOrigins        []string
-	StationMTLSAddress       string
-	StationMTLSCAFile        string
-	StationMTLSCertFile      string
-	StationMTLSKeyFile       string
-	StationCatalogToken      string
-	ChartRegistryHost        string
-	ChartRegistryInternalURL string
-	ReadTimeout              time.Duration
-	WriteTimeout             time.Duration
-	ShutdownTimeout          time.Duration
+	Environment                 string
+	Address                     string
+	DatabaseURL                 string
+	DatabaseMaxOpen             int
+	DatabaseMaxIdle             int
+	GatewayBaseURL              string
+	GatewayToken                string
+	GatewayAdminToken           string
+	LoginDirectoryBaseURL       string
+	LoginDirectoryToken         string
+	DevLoginSubject             string
+	TrustAuthHeaders            bool
+	AllowedOrigins              []string
+	StationMTLSAddress          string
+	StationMTLSCAFile           string
+	StationMTLSCertFile         string
+	StationMTLSKeyFile          string
+	StationCatalogToken         string
+	ChartRegistryHost           string
+	ChartRegistryInternalURL    string
+	StudioPublishHMACKey        string
+	StudioPublishBindings       []StudioPublishBinding
+	StationOrganizationBindings []StationOrganizationBinding
+	ReadTimeout                 time.Duration
+	WriteTimeout                time.Duration
+	ShutdownTimeout             time.Duration
+}
+
+type StudioPublishBinding struct {
+	StationUserID         string `json:"stationUserId"`
+	StationOrganizationID string `json:"stationOrganizationId"`
+	LoginSubject          string `json:"loginSubject"`
+	ControlOrganizationID string `json:"controlOrganizationId"`
+}
+
+type StationOrganizationBinding struct {
+	StationOrganizationID string `json:"stationOrganizationId"`
+	ControlOrganizationID string `json:"controlOrganizationId"`
 }
 
 func Load() (Config, error) {
@@ -91,31 +107,69 @@ func Load() (Config, error) {
 	}
 	chartRegistryHost := env("CONTROL_CHART_REGISTRY_HOST", "registry.verdantflare.ai")
 	chartRegistryInternalURL := env("CONTROL_CHART_REGISTRY_INTERNAL_URL", "https://"+chartRegistryHost)
+	studioPublishHMACKey := strings.TrimSpace(os.Getenv("CONTROL_STUDIO_PUBLISH_HMAC_KEY"))
+	studioPublishBindings := strings.TrimSpace(os.Getenv("CONTROL_STUDIO_PUBLISH_BINDINGS"))
+	if (studioPublishHMACKey == "") != (studioPublishBindings == "") {
+		return Config{}, fmt.Errorf("CONTROL_STUDIO_PUBLISH_HMAC_KEY and CONTROL_STUDIO_PUBLISH_BINDINGS must be set together")
+	}
+	if studioPublishHMACKey != "" && len(studioPublishHMACKey) < 32 {
+		return Config{}, fmt.Errorf("CONTROL_STUDIO_PUBLISH_HMAC_KEY must contain at least 32 characters")
+	}
+	var publishBindings []StudioPublishBinding
+	if studioPublishBindings != "" {
+		if err := json.Unmarshal([]byte(studioPublishBindings), &publishBindings); err != nil || len(publishBindings) == 0 {
+			return Config{}, fmt.Errorf("CONTROL_STUDIO_PUBLISH_BINDINGS must be a nonempty JSON array")
+		}
+		seen := map[string]bool{}
+		for _, binding := range publishBindings {
+			key := binding.StationUserID + "/" + binding.StationOrganizationID
+			if binding.StationUserID == "" || binding.StationOrganizationID == "" || binding.LoginSubject == "" || binding.ControlOrganizationID == "" || seen[key] {
+				return Config{}, fmt.Errorf("CONTROL_STUDIO_PUBLISH_BINDINGS contains an incomplete or duplicate mapping")
+			}
+			seen[key] = true
+		}
+	}
+	var stationBindings []StationOrganizationBinding
+	if raw := strings.TrimSpace(os.Getenv("CONTROL_STATION_ORGANIZATION_BINDINGS")); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &stationBindings); err != nil {
+			return Config{}, fmt.Errorf("CONTROL_STATION_ORGANIZATION_BINDINGS must be a JSON array")
+		}
+		seen := map[string]bool{}
+		for _, binding := range stationBindings {
+			if binding.StationOrganizationID == "" || binding.ControlOrganizationID == "" || seen[binding.StationOrganizationID] {
+				return Config{}, fmt.Errorf("CONTROL_STATION_ORGANIZATION_BINDINGS contains an incomplete or duplicate mapping")
+			}
+			seen[binding.StationOrganizationID] = true
+		}
+	}
 
 	return Config{
-		Environment:              environment,
-		Address:                  env("CONTROL_ADDRESS", ":8080"),
-		DatabaseURL:              databaseURL,
-		DatabaseMaxOpen:          positiveInt("CONTROL_DATABASE_MAX_OPEN", 5),
-		DatabaseMaxIdle:          positiveInt("CONTROL_DATABASE_MAX_IDLE", 2),
-		GatewayBaseURL:           gatewayBaseURL,
-		GatewayToken:             gatewayToken,
-		GatewayAdminToken:        gatewayAdminToken,
-		LoginDirectoryBaseURL:    loginDirectoryBaseURL,
-		LoginDirectoryToken:      loginDirectoryToken,
-		DevLoginSubject:          devSubject,
-		TrustAuthHeaders:         trustHeaders,
-		AllowedOrigins:           splitCSV(os.Getenv("CONTROL_ALLOWED_ORIGINS")),
-		StationMTLSAddress:       stationAddress,
-		StationMTLSCAFile:        stationCAFile,
-		StationMTLSCertFile:      stationCertFile,
-		StationMTLSKeyFile:       stationKeyFile,
-		StationCatalogToken:      strings.TrimSpace(os.Getenv("CONTROL_STATION_CATALOG_TOKEN")),
-		ChartRegistryHost:        chartRegistryHost,
-		ChartRegistryInternalURL: chartRegistryInternalURL,
-		ReadTimeout:              10 * time.Second,
-		WriteTimeout:             15 * time.Second,
-		ShutdownTimeout:          10 * time.Second,
+		Environment:                 environment,
+		Address:                     env("CONTROL_ADDRESS", ":8080"),
+		DatabaseURL:                 databaseURL,
+		DatabaseMaxOpen:             positiveInt("CONTROL_DATABASE_MAX_OPEN", 5),
+		DatabaseMaxIdle:             positiveInt("CONTROL_DATABASE_MAX_IDLE", 2),
+		GatewayBaseURL:              gatewayBaseURL,
+		GatewayToken:                gatewayToken,
+		GatewayAdminToken:           gatewayAdminToken,
+		LoginDirectoryBaseURL:       loginDirectoryBaseURL,
+		LoginDirectoryToken:         loginDirectoryToken,
+		DevLoginSubject:             devSubject,
+		TrustAuthHeaders:            trustHeaders,
+		AllowedOrigins:              splitCSV(os.Getenv("CONTROL_ALLOWED_ORIGINS")),
+		StationMTLSAddress:          stationAddress,
+		StationMTLSCAFile:           stationCAFile,
+		StationMTLSCertFile:         stationCertFile,
+		StationMTLSKeyFile:          stationKeyFile,
+		StationCatalogToken:         strings.TrimSpace(os.Getenv("CONTROL_STATION_CATALOG_TOKEN")),
+		ChartRegistryHost:           chartRegistryHost,
+		ChartRegistryInternalURL:    chartRegistryInternalURL,
+		StudioPublishHMACKey:        studioPublishHMACKey,
+		StudioPublishBindings:       publishBindings,
+		StationOrganizationBindings: stationBindings,
+		ReadTimeout:                 10 * time.Second,
+		WriteTimeout:                15 * time.Second,
+		ShutdownTimeout:             10 * time.Second,
 	}, nil
 }
 

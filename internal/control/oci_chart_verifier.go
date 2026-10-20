@@ -33,10 +33,15 @@ type CreateOCIChartInput struct {
 }
 
 type CreateOCIAppVersionInput struct {
-	Version        string               `json:"version"`
-	Chart          *CreateOCIChartInput `json:"chart"`
-	ReleaseNotes   string               `json:"releaseNotes"`
-	SourceRevision string               `json:"sourceRevision"`
+	Version         string               `json:"version"`
+	Chart           *CreateOCIChartInput `json:"chart"`
+	ReleaseNotes    string               `json:"releaseNotes"`
+	SourceRevision  string               `json:"sourceRevision"`
+	UpstreamVersion string               `json:"upstreamVersion,omitempty"`
+	Publisher       string               `json:"publisher,omitempty"`
+	SourceURL       string               `json:"sourceUrl,omitempty"`
+	LicenseID       string               `json:"licenseId,omitempty"`
+	LicenseURL      string               `json:"licenseUrl,omitempty"`
 }
 
 type ociManifestPayload struct {
@@ -127,6 +132,11 @@ func (s *Service) CreateOCIAppVersion(ctx context.Context, subject, appID string
 	if err != nil {
 		return domain.AppVersion{}, false, err
 	}
+	verified.UpstreamVersion = strings.TrimSpace(input.UpstreamVersion)
+	verified.Publisher = strings.TrimSpace(input.Publisher)
+	verified.SourceURL = strings.TrimSpace(input.SourceURL)
+	verified.LicenseID = strings.TrimSpace(input.LicenseID)
+	verified.LicenseURL = strings.TrimSpace(input.LicenseURL)
 
 	if existing, err := s.repository.AppVersion(ctx, appID, version); err == nil {
 		if existing.Chart != nil &&
@@ -135,7 +145,12 @@ func (s *Service) CreateOCIAppVersion(ctx context.Context, subject, appID string
 			existing.Chart.ManifestDigest == verified.Chart.ManifestDigest &&
 			existing.Chart.PackageDigest == verified.Chart.PackageDigest &&
 			existing.ReleaseNotes == verified.ReleaseNotes &&
-			existing.SourceRevision == verified.SourceRevision {
+			existing.SourceRevision == verified.SourceRevision &&
+			existing.UpstreamVersion == verified.UpstreamVersion &&
+			existing.Publisher == verified.Publisher &&
+			existing.SourceURL == verified.SourceURL &&
+			existing.LicenseID == verified.LicenseID &&
+			existing.LicenseURL == verified.LicenseURL {
 			return existing, false, nil
 		}
 		return domain.AppVersion{}, false, domain.NewError(409, "VERSION_CONFLICT", "该发行版本已经绑定其他制品，请使用新版本号")

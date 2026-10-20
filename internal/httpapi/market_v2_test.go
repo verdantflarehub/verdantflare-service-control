@@ -206,6 +206,29 @@ func createTestAppV2(t *testing.T, server *httptest.Server, appID, name, groupID
 	return app
 }
 
+func TestMarketV2PublicationReadinessEndpoint(t *testing.T) {
+	server := newTestServerWithOCIRegistry(t, nil, nil)
+	created := createTestAppV2(t, server, "readiness-app", "Readiness App", "image")
+	path := "/api/control/ops/v2/apps/readiness-app/readiness"
+	res := request(t, server, http.MethodGet, path, nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("readiness status = %d, body = %s", res.StatusCode, readBody(t, res))
+	}
+	var before control.PublicationReadiness
+	decode(t, res, &before)
+	res.Body.Close()
+	if before.Ready || len(before.MissingFields) == 0 || before.Revision != created.Revision {
+		t.Fatalf("incomplete draft reported ready: %+v", before)
+	}
+	listed := requestWithHeaders(t, server, http.MethodPatch, "/api/control/ops/v2/apps/readiness-app", map[string]any{
+		"visibility": "listed",
+	}, map[string]string{"If-Match": fmt.Sprintf("app:readiness-app:%d", created.Revision)})
+	if listed.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("incomplete listing status = %d, body = %s", listed.StatusCode, readBody(t, listed))
+	}
+	listed.Body.Close()
+}
+
 func TestMarketV2OCIChartRegistrationLifecycleAndIdempotency(t *testing.T) {
 	art := makeTestOCIArtifact(t, "flux-image", "0.1.3", "0.1.3")
 	mismatchArt := makeTestOCIArtifact(t, "wrong-chart", "0.1.3", "0.1.3")
@@ -342,6 +365,17 @@ func TestMarketV2ReleaseSelectionAndAppsYamlContract(t *testing.T) {
 	}
 	server := newTestServerWithOCIRegistry(t, artifacts, blobs)
 	createTestAppV2(t, server, "flux-image", "Flux 图像工作台", "image")
+	metadata := requestWithHeaders(t, server, http.MethodPatch, "/api/control/ops/v2/apps/flux-image", map[string]any{
+		"developer": "VerdantFlare",
+		"showcase": map[string]any{
+			"screenshots": []string{"https://example.test/flux.png"},
+			"highlights":  []string{"工作流图像生成"},
+		},
+	}, map[string]string{"If-Match": "app:flux-image:1"})
+	if metadata.StatusCode != http.StatusOK {
+		t.Fatalf("set release metadata status = %d, body = %s", metadata.StatusCode, readBody(t, metadata))
+	}
+	metadata.Body.Close()
 
 	// Register OCI Chart version 0.1.3 for flux-image
 	regRes := request(t, server, http.MethodPost, "/api/control/ops/v2/apps/flux-image/versions", map[string]any{

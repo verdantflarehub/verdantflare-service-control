@@ -32,6 +32,15 @@ func (p *Postgres) UpdateManagedApp(ctx context.Context, id string, app domain.A
 	return
 }
 
+func (p *Postgres) UpdateManagedAppIfRevision(ctx context.Context, id string, app domain.App, expectedRevision int) (result domain.ManagedApp, err error) {
+	err = p.mutate(ctx, func(m *Memory) error {
+		var e error
+		result, e = m.UpdateManagedAppIfRevision(ctx, id, app, expectedRevision)
+		return e
+	})
+	return
+}
+
 func (p *Postgres) CreateAppVersion(ctx context.Context, version domain.AppVersion) (result domain.AppVersion, err error) {
 	err = p.mutate(ctx, func(m *Memory) error { var e error; result, e = m.CreateAppVersion(ctx, version); return e })
 	return
@@ -107,4 +116,13 @@ func (p *Postgres) UpdateManagedOrganization(ctx context.Context, id string, org
 		return e
 	})
 	return
+}
+
+func (p *Postgres) GrantAppToOrganization(ctx context.Context, organizationID, appID string, expectedVersion int) (result domain.ManagedOrganization, err error) {
+	err = p.mutate(ctx, func(m *Memory) error {
+		var e error
+		result, e = m.GrantAppToOrganization(ctx, organizationID, appID, expectedVersion)
+		return e
+	})
+	return result, err
 }

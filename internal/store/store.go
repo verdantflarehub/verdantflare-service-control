@@ -48,6 +48,7 @@ type Repository interface {
 	CreateManagedApp(context.Context, domain.App) (domain.ManagedApp, error)
 	ManagedApp(context.Context, string) (domain.ManagedApp, error)
 	UpdateManagedApp(context.Context, string, domain.App) (domain.ManagedApp, error)
+	UpdateManagedAppIfRevision(context.Context, string, domain.App, int) (domain.ManagedApp, error)
 	CreateAppVersion(context.Context, domain.AppVersion) (domain.AppVersion, error)
 	ListAppVersions(context.Context, string) ([]domain.AppVersion, error)
 	AppVersion(context.Context, string, string) (domain.AppVersion, error)
@@ -64,4 +65,5 @@ type Repository interface {
 	CreateManagedOrganization(context.Context, domain.Organization) (domain.ManagedOrganization, error)
 	ManagedOrganization(context.Context, string) (domain.ManagedOrganization, error)
 	UpdateManagedOrganization(context.Context, string, domain.Organization, []string, int) (domain.ManagedOrganization, error)
+	GrantAppToOrganization(context.Context, string, string, int) (domain.ManagedOrganization, error)
 }

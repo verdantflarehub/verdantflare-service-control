@@ -64,6 +64,15 @@ func (s *Server) getManagedAppV2(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, managed.App)
 }
 
+func (s *Server) getAppPublicationReadinessV2(w http.ResponseWriter, r *http.Request) {
+	subject, ok := s.subject(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.service.AppPublicationReadiness(r.Context(), subject, r.PathValue("appID"))
+	s.respond(w, r, result, err, http.StatusOK)
+}
+
 func (s *Server) patchManagedAppV2(w http.ResponseWriter, r *http.Request) {
 	subject, ok := s.subject(w, r)
 	if !ok {
@@ -179,6 +188,32 @@ func (s *Server) opsAppsYAMLV2(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(raw)
+}
+
+func (s *Server) stationInstallGrantV2(w http.ResponseWriter, r *http.Request) {
+	authorization := strings.TrimSpace(r.Header.Get("Authorization"))
+	if len(r.Header.Values("Authorization")) != 1 || !strings.HasPrefix(authorization, "Bearer ") || s.config.StationCatalogToken == "" || subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(authorization, "Bearer ")), []byte(s.config.StationCatalogToken)) != 1 {
+		s.writeError(w, r, domain.NewError(401, "UNAUTHORIZED", "缺少有效 Station 凭证"))
+		return
+	}
+	stationOrg := r.PathValue("organizationID")
+	controlOrg := ""
+	for _, binding := range s.config.StationOrganizationBindings {
+		if binding.StationOrganizationID == stationOrg {
+			controlOrg = binding.ControlOrganizationID
+			break
+		}
+	}
+	grant, err := s.service.StationInstallGrant(r.Context(), r.PathValue("appID"), r.PathValue("version"), controlOrg)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	if !grant.Allowed {
+		s.writeError(w, r, domain.NewError(403, "INSTALL_GRANT_REQUIRED", "该组织未获应用安装权益"))
+		return
+	}
+	writeJSON(w, http.StatusOK, grant)
 }
 
 func (s *Server) authorizeStationV2(w http.ResponseWriter, r *http.Request) (string, bool) {

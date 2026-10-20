@@ -29,31 +29,31 @@ type CreateAppV2Input struct {
 }
 
 type PatchAppV2Input struct {
-	Name             *string              `json:"name"`
-	Description      *string              `json:"description"`
-	Summary          *string              `json:"summary"`
-	GroupID          *string              `json:"groupId"`
-	Brand            *string              `json:"brand"`
-	IconRef          *string              `json:"iconRef"`
-	Category         *string              `json:"category"`
-	SortOrder        *int                 `json:"sortOrder"`
-	Logo             *domain.LogoRef      `json:"logo"`
-	Visibility       *string              `json:"visibility"`
-	Enabled          *bool                `json:"enabled"`
-	DisabledReason   *string              `json:"disabledReason"`
-	Models           *[]string            `json:"models"`
-	Capabilities     *[]string            `json:"capabilities"`
+	Name             *string               `json:"name"`
+	Description      *string               `json:"description"`
+	Summary          *string               `json:"summary"`
+	GroupID          *string               `json:"groupId"`
+	Brand            *string               `json:"brand"`
+	IconRef          *string               `json:"iconRef"`
+	Category         *string               `json:"category"`
+	SortOrder        *int                  `json:"sortOrder"`
+	Logo             *domain.LogoRef       `json:"logo"`
+	Visibility       *string               `json:"visibility"`
+	Enabled          *bool                 `json:"enabled"`
+	DisabledReason   *string               `json:"disabledReason"`
+	Models           *[]string             `json:"models"`
+	Capabilities     *[]string             `json:"capabilities"`
 	Images           *[]domain.AppImageRef `json:"images"`
-	Version          *string              `json:"version"`
-	Channel          *string              `json:"channel"`
-	Developer        *string              `json:"developer"`
-	PublicIconURL    *string              `json:"publicIconUrl"`
-	PublicVisible    *bool                `json:"publicVisible"`
-	Showcase         *domain.AppShowcase  `json:"showcase"`
-	PublishedVersion *string              `json:"publishedVersion"`
-	Revision         *int                 `json:"revision"`
-	CreatedAt        *string              `json:"createdAt"`
-	UpdatedAt        *string              `json:"updatedAt"`
+	Version          *string               `json:"version"`
+	Channel          *string               `json:"channel"`
+	Developer        *string               `json:"developer"`
+	PublicIconURL    *string               `json:"publicIconUrl"`
+	PublicVisible    *bool                 `json:"publicVisible"`
+	Showcase         *domain.AppShowcase   `json:"showcase"`
+	PublishedVersion *string               `json:"publishedVersion"`
+	Revision         *int                  `json:"revision"`
+	CreatedAt        *string               `json:"createdAt"`
+	UpdatedAt        *string               `json:"updatedAt"`
 }
 
 type ReleaseSelectionInput struct {
@@ -91,8 +91,8 @@ func (s *Service) CreateManagedAppV2(ctx context.Context, subject string, input 
 		return domain.App{}, domain.NewError(400, "app_id_invalid", "应用 ID 须为 2–63 位小写字母、数字或连字符")
 	}
 	name := strings.TrimSpace(input.Name)
-	if n := utf8.RuneCountInString(name); n < 1 || n > 128 {
-		return domain.App{}, domain.NewError(400, "app_name_invalid", "应用名称须为 1–128 个字符")
+	if n := utf8.RuneCountInString(name); n < 2 || n > 128 {
+		return domain.App{}, domain.NewError(400, "app_name_invalid", "应用名称须为 2–128 个字符")
 	}
 	groupID := strings.TrimSpace(input.GroupID)
 	if !slices.Contains([]string{"system", "channel", "image", "video", "music", "desktop", "agent"}, groupID) {
@@ -119,6 +119,9 @@ func (s *Service) CreateManagedAppV2(ctx context.Context, subject string, input 
 	}
 	if utf8.RuneCountInString(description) < 1 || utf8.RuneCountInString(description) > 16384 {
 		return domain.App{}, domain.NewError(400, "app_description_invalid", "应用说明须为 1–16384 个字符")
+	}
+	if n := utf8.RuneCountInString(summary); n < 1 || n > 512 {
+		return domain.App{}, domain.NewError(400, "app_summary_invalid", "一句话简介须为 1–512 个字符")
 	}
 	category := strings.TrimSpace(input.Category)
 	if category == "" {
@@ -258,9 +261,17 @@ func (s *Service) PatchManagedAppV2(ctx context.Context, subject, appID, ifMatch
 	if input.Showcase != nil {
 		updated.Showcase = *input.Showcase
 	}
+	if err := validateEditorialFields(updated); err != nil {
+		return domain.App{}, err
+	}
+	if current.App.Visibility != "listed" && updated.Visibility == "listed" {
+		if readiness := publicationReadiness(updated); !readiness.Ready {
+			return domain.App{}, domain.NewError(422, "LISTING_INCOMPLETE", "上架资料不完整："+strings.Join(readiness.MissingFields, ", "))
+		}
+	}
 
-	if utf8.RuneCountInString(updated.Name) < 1 || utf8.RuneCountInString(updated.Name) > 128 {
-		return domain.App{}, domain.NewError(400, "app_invalid", "应用名称须为 1–128 个字符")
+	if utf8.RuneCountInString(updated.Name) < 2 || utf8.RuneCountInString(updated.Name) > 128 {
+		return domain.App{}, domain.NewError(400, "app_invalid", "应用名称须为 2–128 个字符")
 	}
 	if updated.SortOrder < 0 || updated.SortOrder > 1000000 {
 		return domain.App{}, domain.NewError(400, "app_sort_order_invalid", "sortOrder 须为 0–1000000 的整数")
@@ -281,7 +292,7 @@ func (s *Service) PatchManagedAppV2(ctx context.Context, subject, appID, ifMatch
 	if updated.Enabled {
 		updated.DisabledReason = ""
 	}
-	res, err := s.repository.UpdateManagedApp(ctx, appID, updated)
+	res, err := s.repository.UpdateManagedAppIfRevision(ctx, appID, updated, current.App.Revision)
 	if err != nil {
 		return domain.App{}, err
 	}
@@ -289,6 +300,10 @@ func (s *Service) PatchManagedAppV2(ctx context.Context, subject, appID, ifMatch
 }
 
 func (s *Service) SelectAppReleaseV2(ctx context.Context, subject, appID, ifMatch string, version *string) (domain.App, error) {
+	return s.selectAppReleaseV2(ctx, subject, appID, ifMatch, version, false)
+}
+
+func (s *Service) selectAppReleaseV2(ctx context.Context, subject, appID, ifMatch string, version *string, requireInstallGrant bool) (domain.App, error) {
 	if err := s.requireOperationsRole(ctx, subject, "app_ops_admin"); err != nil {
 		return domain.App{}, err
 	}
@@ -301,6 +316,9 @@ func (s *Service) SelectAppReleaseV2(ctx context.Context, subject, appID, ifMatc
 	}
 	updated := current.App
 	if version != nil && strings.TrimSpace(*version) != "" {
+		if readiness := publicationReadiness(updated); !readiness.Ready {
+			return domain.App{}, domain.NewError(422, "LISTING_INCOMPLETE", "发布资料不完整："+strings.Join(readiness.MissingFields, ", "))
+		}
 		targetVer := strings.TrimSpace(*version)
 		verRecord, err := s.repository.AppVersion(ctx, appID, targetVer)
 		if err != nil {
@@ -319,6 +337,9 @@ func (s *Service) SelectAppReleaseV2(ctx context.Context, subject, appID, ifMatc
 		updated.Visibility = "listed"
 		updated.Channel = "Stable"
 		updated.PublicVisible = true
+		if requireInstallGrant {
+			updated.InstallGrantRequired = true
+		}
 		if len(verRecord.Models) > 0 || updated.Models == nil {
 			updated.Models = slices.Clone(verRecord.Models)
 		}
@@ -342,7 +363,7 @@ func (s *Service) SelectAppReleaseV2(ctx context.Context, subject, appID, ifMatc
 			updated.Channel = "Listed"
 		}
 	}
-	res, err := s.repository.UpdateManagedApp(ctx, appID, updated)
+	res, err := s.repository.UpdateManagedAppIfRevision(ctx, appID, updated, current.App.Revision)
 	if err != nil {
 		return domain.App{}, err
 	}
