@@ -349,7 +349,7 @@ func (s *Service) SelectAppReleaseV2(ctx context.Context, subject, appID, ifMatc
 	return res.App, nil
 }
 
-func (s *Service) MarketAppsYAML(ctx context.Context, organizationID string) (domain.MarketAppsYaml, []byte, string, error) {
+func (s *Service) MarketAppsYAML(ctx context.Context, organizationID string, stationFeed bool) (domain.MarketAppsYaml, []byte, string, error) {
 	apps, err := s.repository.ListManagedApps(ctx)
 	if err != nil {
 		return domain.MarketAppsYaml{}, nil, "", err
@@ -428,6 +428,10 @@ func (s *Service) MarketAppsYAML(ctx context.Context, organizationID string) (do
 		}
 
 		distributable := pubVer != nil && (app.Enabled || app.PublishedVersion != "") && strings.TrimSpace(app.DisabledReason) == ""
+		// Station only receives a release that has passed chart verification and is enabled for distribution.
+		if stationFeed && !distributable {
+			continue
+		}
 		if distributable {
 			item.Version = pubVer.Version
 			item.Chart = pubVer.Chart.OCIRef

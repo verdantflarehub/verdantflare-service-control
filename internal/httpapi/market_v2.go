@@ -165,7 +165,7 @@ func (s *Server) opsAppsYAMLV2(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	_, raw, etag, err := s.service.MarketAppsYAML(r.Context(), "ops")
+	_, raw, etag, err := s.service.MarketAppsYAML(r.Context(), "ops", false)
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -244,7 +244,7 @@ func (s *Server) stationAppsYAMLV2(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	_, raw, etag, err := s.service.MarketAppsYAML(r.Context(), scope)
+	_, raw, etag, err := s.service.MarketAppsYAML(r.Context(), scope, true)
 	if err != nil {
 		s.writeError(w, r, err)
 		return

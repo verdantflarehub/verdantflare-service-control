@@ -461,4 +461,12 @@ func TestMarketV2ReleaseSelectionAndAppsYamlContract(t *testing.T) {
 	if unpublishedApp.PublishedVersion != "" || unpublishedApp.Enabled || unpublishedApp.DisabledReason == "" {
 		t.Fatalf("expected unpublished app to have empty publishedVersion and non-empty disabledReason, got %+v", unpublishedApp)
 	}
+	after := request(t, server, http.MethodGet, "/api/control/station/v2/apps.yaml", nil)
+	defer after.Body.Close()
+	if after.StatusCode != http.StatusOK {
+		t.Fatalf("station apps.yaml after unpublish status = %d", after.StatusCode)
+	}
+	if strings.Contains(readBody(t, after), "flux-image") {
+		t.Fatal("unverified release was sent to Station")
+	}
 }
