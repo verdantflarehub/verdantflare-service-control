@@ -337,7 +337,9 @@ func (s *Service) selectAppReleaseV2(ctx context.Context, subject, appID, ifMatc
 		updated.Visibility = "listed"
 		updated.Channel = "Stable"
 		updated.PublicVisible = true
-		if requireInstallGrant {
+		// The publisher is self-bootstrapped from Hub before its MCP can run.
+		// Hub release selection must not make this admin tool installable by all Stations.
+		if releaseRequiresInstallGrant(appID, requireInstallGrant) {
 			updated.InstallGrantRequired = true
 		}
 		if len(verRecord.Models) > 0 || updated.Models == nil {
@@ -368,6 +370,10 @@ func (s *Service) selectAppReleaseV2(ctx context.Context, subject, appID, ifMatc
 		return domain.App{}, err
 	}
 	return res.App, nil
+}
+
+func releaseRequiresInstallGrant(appID string, requested bool) bool {
+	return requested || appID == "app-publishing"
 }
 
 func (s *Service) MarketAppsYAML(ctx context.Context, organizationID string, stationFeed bool) (domain.MarketAppsYaml, []byte, string, error) {
