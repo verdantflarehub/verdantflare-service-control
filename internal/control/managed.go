@@ -15,36 +15,36 @@ import (
 var appIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
 
 type ManagedAppInput struct {
-	ID               string              `json:"id"`
-	Name             string              `json:"name"`
-	GroupID          string              `json:"groupId"`
-	SortOrder        int                 `json:"sortOrder"`
-	Brand            string              `json:"brand"`
-	IconRef          string              `json:"iconRef"`
-	Visibility       string              `json:"visibility"`
-	Enabled          *bool               `json:"enabled"`
-	DisabledReason   string              `json:"disabledReason"`
-	PublishedVersion string              `json:"publishedVersion"`
-	Models           []string            `json:"models"`
-	Capabilities     []string            `json:"capabilities"`
+	ID               string               `json:"id"`
+	Name             string               `json:"name"`
+	GroupID          string               `json:"groupId"`
+	SortOrder        int                  `json:"sortOrder"`
+	Brand            string               `json:"brand"`
+	IconRef          string               `json:"iconRef"`
+	Visibility       string               `json:"visibility"`
+	Enabled          *bool                `json:"enabled"`
+	DisabledReason   string               `json:"disabledReason"`
+	PublishedVersion string               `json:"publishedVersion"`
+	Models           []string             `json:"models"`
+	Capabilities     []string             `json:"capabilities"`
 	Images           []domain.AppImageRef `json:"images"`
-	Logo             *domain.LogoRef     `json:"logo"`
-	Category         string              `json:"category"`
-	Summary          string              `json:"summary"`
-	Version          string              `json:"version"`
-	GPU              string              `json:"gpu"`
-	Duration         string              `json:"duration"`
-	Icon             string              `json:"icon"`
-	Tone             string              `json:"tone"`
-	Channel          string              `json:"channel"`
-	Developer        string              `json:"developer"`
-	Description      string              `json:"description"`
-	Memory           string              `json:"memory"`
-	Disk             string              `json:"disk"`
-	CPU              string              `json:"cpu"`
-	PublicIconURL    string              `json:"publicIconUrl"`
-	PublicVisible    bool                `json:"publicVisible"`
-	Showcase         *domain.AppShowcase `json:"showcase"`
+	Logo             *domain.LogoRef      `json:"logo"`
+	Category         string               `json:"category"`
+	Summary          string               `json:"summary"`
+	Version          string               `json:"version"`
+	GPU              string               `json:"gpu"`
+	Duration         string               `json:"duration"`
+	Icon             string               `json:"icon"`
+	Tone             string               `json:"tone"`
+	Channel          string               `json:"channel"`
+	Developer        string               `json:"developer"`
+	Description      string               `json:"description"`
+	Memory           string               `json:"memory"`
+	Disk             string               `json:"disk"`
+	CPU              string               `json:"cpu"`
+	PublicIconURL    string               `json:"publicIconUrl"`
+	PublicVisible    bool                 `json:"publicVisible"`
+	Showcase         *domain.AppShowcase  `json:"showcase"`
 }
 
 type CreateManagedOrganizationInput struct {
@@ -323,7 +323,7 @@ func (s *Service) UpdateManagedOrganization(ctx context.Context, subject, id str
 	if err := s.requireOperationsRole(ctx, subject, "customer_success_admin"); err != nil {
 		return domain.ManagedOrganization{}, err
 	}
-	if !slices.Contains([]string{"Pilot", "Studio", "Enterprise"}, input.Plan) || !slices.Contains([]string{"正常", "冻结"}, input.Status) || input.AppIDs == nil || input.ExpectedEntitlementVersion < 1 {
+	if !slices.Contains([]string{"正常", "冻结"}, input.Status) || input.AppIDs == nil || input.ExpectedEntitlementVersion < 1 {
 		return domain.ManagedOrganization{}, domain.NewError(400, "organization_update_invalid", "套餐、状态、权益或版本无效")
 	}
 	input.Name = strings.TrimSpace(input.Name)
@@ -348,6 +348,11 @@ func (s *Service) UpdateManagedOrganization(ctx context.Context, subject, id str
 	}
 	if current.Organization.EntitlementVersion != input.ExpectedEntitlementVersion {
 		return domain.ManagedOrganization{}, domain.NewError(409, "entitlement_version_conflict", "权益已被其他管理员修改，请刷新后重试")
+	}
+	// Legacy internal organizations may have no plan. Preserve that value when
+	// updating entitlements, but never allow an existing plan to be cleared.
+	if !slices.Contains([]string{"Pilot", "Studio", "Enterprise"}, input.Plan) && !(input.Plan == "" && current.Organization.Plan == "") {
+		return domain.ManagedOrganization{}, domain.NewError(400, "organization_update_invalid", "套餐、状态、权益或版本无效")
 	}
 	if (input.Status == "冻结" || current.Organization.Status == "冻结") && s.accountGateway == nil {
 		return domain.ManagedOrganization{}, domain.NewError(503, "gateway_accounts_unconfigured", "模型网关账号服务尚未配置")
