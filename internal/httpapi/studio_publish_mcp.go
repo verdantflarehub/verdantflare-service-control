@@ -34,6 +34,8 @@ func (s *Server) studioPublishMCP(w http.ResponseWriter, r *http.Request) {
 	var result any
 	var err error
 	switch request.Params.Name {
+	case "app_publish.list":
+		result, err = s.service.StudioPublicationDirectory(r.Context(), subject)
 	case "app_publish.organizations":
 		result, err = s.service.StudioPublicationOrganizations(r.Context(), subject)
 	case "app_publish.get":

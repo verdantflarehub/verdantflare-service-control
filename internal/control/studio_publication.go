@@ -38,6 +38,32 @@ type StudioPublicationResult struct {
 	CatalogETag     string            `json:"catalogETag"`
 }
 
+type StudioPublicationList struct {
+	Items       []domain.App               `json:"items"`
+	CatalogApps []domain.MarketCatalogItem `json:"catalogApps"`
+	CatalogETag string                     `json:"catalogETag"`
+}
+
+// StudioPublicationDirectory combines the editable Control records with the
+// current Station feed so the management page never guesses installability.
+func (s *Service) StudioPublicationDirectory(ctx context.Context, subject string) (StudioPublicationList, error) {
+	apps, err := s.ListManagedAppsV2(ctx, subject)
+	if err != nil {
+		return StudioPublicationList{}, err
+	}
+	catalog, _, etag, err := s.MarketAppsYAML(ctx, "studio-publish", true)
+	if err != nil {
+		return StudioPublicationList{}, err
+	}
+	if apps == nil {
+		apps = []domain.App{}
+	}
+	if catalog.Apps == nil {
+		catalog.Apps = []domain.MarketCatalogItem{}
+	}
+	return StudioPublicationList{Items: apps, CatalogApps: catalog.Apps, CatalogETag: etag}, nil
+}
+
 func (s *Service) StudioPublicationOrganizations(ctx context.Context, subject string) ([]domain.OperationsOrganization, error) {
 	if err := s.requireOperationsRole(ctx, subject, "app_ops_admin"); err != nil {
 		return nil, err

@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,7 +23,7 @@ func TestStudioPublicationDelegationRejectsUnsignedAndReplay(t *testing.T) {
 	cfg.StudioPublishBindings = []config.StudioPublishBinding{{StationUserID: "station-user", StationOrganizationID: "station-org", LoginSubject: "logto_01vf9k2", ControlOrganizationID: "org_verdantflare"}}
 	server := newTestServer(t, cfg)
 	path := "/api/control/internal/studio-publish/mcp"
-	requestBody := []byte(`{"jsonrpc":"2.0","id":"request-1","method":"tools/call","params":{"name":"app_publish.readiness","arguments":{"app_id":"missing-app"}}}`)
+	requestBody := []byte(`{"jsonrpc":"2.0","id":"request-1","method":"tools/call","params":{"name":"app_publish.list","arguments":{}}}`)
 	unsigned, err := http.Post(server.URL+path, "application/json", bytes.NewReader(requestBody))
 	if err != nil {
 		t.Fatal(err)
@@ -57,10 +58,24 @@ func TestStudioPublicationDelegationRejectsUnsignedAndReplay(t *testing.T) {
 		return resp
 	}
 	first := call()
-	io.Copy(io.Discard, first.Body)
+	var result struct {
+		Result struct {
+			StructuredContent struct {
+				Items       []json.RawMessage `json:"items"`
+				CatalogApps []json.RawMessage `json:"catalogApps"`
+				CatalogETag string            `json:"catalogETag"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(first.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
 	first.Body.Close()
 	if first.StatusCode != http.StatusOK {
 		t.Fatalf("signed status = %d", first.StatusCode)
+	}
+	if result.Result.StructuredContent.Items == nil || result.Result.StructuredContent.CatalogApps == nil || result.Result.StructuredContent.CatalogETag == "" {
+		t.Fatal("signed list did not return managed apps and Station catalog snapshot")
 	}
 	replayed := call()
 	io.Copy(io.Discard, replayed.Body)
