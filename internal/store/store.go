@@ -68,6 +68,10 @@ type Repository interface {
 	GrantAppToOrganization(context.Context, string, string, int) (domain.ManagedOrganization, error)
 	RevokeAppFromOrganization(context.Context, string, string, int) (domain.ManagedOrganization, error)
 
+	CreatePublicationTask(context.Context, domain.PublicationTask) (domain.PublicationTask, error)
+	PublicationTask(context.Context, string) (domain.PublicationTask, error)
+	UpdatePublicationTask(context.Context, domain.PublicationTask) (domain.PublicationTask, error)
+
 	ListMCPTokens(context.Context, string) ([]domain.MCPToken, error)
 	CreateMCPToken(context.Context, domain.MCPToken) (domain.MCPToken, error)
 	RevokeMCPToken(context.Context, string, string, time.Time) error

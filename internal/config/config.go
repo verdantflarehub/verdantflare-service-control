@@ -31,6 +31,9 @@ type Config struct {
 	ChartRegistryHost           string
 	ChartRegistryInternalURL    string
 	RequiredInstallGrantApps    []string
+	MarketGitHubToken           string
+	MarketGitHubRepo            string
+	MarketGitHubAPI             string
 	StationOrganizationBindings []StationOrganizationBinding
 	ReadTimeout                 time.Duration
 	WriteTimeout                time.Duration
@@ -136,6 +139,9 @@ func Load() (Config, error) {
 		ChartRegistryHost:           chartRegistryHost,
 		ChartRegistryInternalURL:    chartRegistryInternalURL,
 		RequiredInstallGrantApps:    requiredInstallGrantApps,
+		MarketGitHubToken:           strings.TrimSpace(os.Getenv("CONTROL_MARKET_GITHUB_TOKEN")),
+		MarketGitHubRepo:            env("CONTROL_MARKET_GITHUB_REPO", "verdantflarehub/verdantflare-market"),
+		MarketGitHubAPI:             env("CONTROL_MARKET_GITHUB_API", "https://api.github.com"),
 		StationOrganizationBindings: stationBindings,
 		ReadTimeout:                 10 * time.Second,
 		WriteTimeout:                15 * time.Second,

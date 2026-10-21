@@ -28,6 +28,7 @@ type Service struct {
 	chartRegistryHost        string
 	chartRegistryURL         string
 	chartHTTPClient          *http.Client
+	market                   MarketRepository
 	requiredInstallGrantApps map[string]bool
 	modelRunSlots            chan struct{}
 	now                      func() time.Time

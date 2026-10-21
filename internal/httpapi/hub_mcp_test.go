@@ -101,7 +101,7 @@ func TestHubMCPRequiresValidToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if len(tools.Result.Tools) != 10 {
+	if len(tools.Result.Tools) != 12 {
 		t.Fatalf("tools = %+v", tools.Result.Tools)
 	}
 

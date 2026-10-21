@@ -82,57 +82,8 @@ func (s *Service) PublishRegisteredOCI(ctx context.Context, subject string, inpu
 	if err := s.requireOperationsRole(ctx, subject, "app_ops_admin"); err != nil {
 		return PublicationResult{}, err
 	}
-	input.AppID = strings.TrimSpace(input.AppID)
-	if !appIDPattern.MatchString(input.AppID) || len(input.OrganizationIDs) == 0 {
-		return PublicationResult{}, domain.NewError(422, "PUBLICATION_INPUT_INVALID", "应用 ID 或授权组织范围无效")
-	}
-	if strings.TrimSpace(input.Category) == "" || strings.TrimSpace(input.Developer) == "" || strings.TrimSpace(input.Summary) == "" || strings.TrimSpace(input.Description) == "" {
-		return PublicationResult{}, domain.NewError(422, "LISTING_INCOMPLETE", "缺少分类、开发者、简介、介绍、截图或功能亮点")
-	}
-	// VerdantFlare's own apps need no third-party license evidence; when a
-	// license is supplied it must still be complete.
-	licenseOptional := strings.TrimSpace(input.Developer) == selfDeveloper && input.Version.LicenseID == "" && input.Version.LicenseURL == ""
-	if input.Version.Chart == nil || input.Version.SourceRevision == "" || (input.Version.SourceURL != "" && !validEditorialURL(input.Version.SourceURL)) ||
-		(!licenseOptional && (input.Version.LicenseID == "" || !validEditorialURL(input.Version.LicenseURL))) {
-		return PublicationResult{}, domain.NewError(422, "VERSION_EVIDENCE_REQUIRED", "固定 OCI 包与源码 revision 为必填；第三方应用还须提供许可证标识与 HTTPS 证据")
-	}
-	if input.Version.Chart.PackageDigest == "" || input.Version.Chart.ManifestDigest == "" {
-		return PublicationResult{}, domain.NewError(422, "CHART_DIGEST_REQUIRED", "须提供已发行 OCI Chart 的双摘要")
-	}
-	// Reject deterministic listing and artifact input errors before creating a
-	// managed app. OCI readback can still fail later; the caller then resumes
-	// against the persisted revision instead of assuming another create.
-	preview := domain.App{ID: input.AppID, Name: input.Name, Category: input.Category, Summary: input.Summary, Description: input.Description, Developer: input.Developer}
-	if input.PublicIconURL != nil {
-		preview.PublicIconURL = *input.PublicIconURL
-	}
-	if input.Showcase != nil {
-		preview.Showcase = *input.Showcase
-	}
-	if err := validateEditorialFields(preview); err != nil {
+	if err := s.preflightPublication(ctx, &input); err != nil {
 		return PublicationResult{}, err
-	}
-	if readiness := publicationReadiness(preview); !readiness.Ready {
-		return PublicationResult{}, domain.NewError(422, "LISTING_INCOMPLETE", "发布资料不完整："+strings.Join(readiness.MissingFields, ", "))
-	}
-	if !chartVersionPattern.MatchString(strings.TrimSpace(input.Version.Version)) || !chartVersionPattern.MatchString(strings.TrimSpace(input.Version.Chart.Version)) ||
-		!imageDigestPattern.MatchString(strings.ToLower(strings.TrimSpace(input.Version.Chart.ManifestDigest))) || !imageDigestPattern.MatchString(strings.ToLower(strings.TrimSpace(input.Version.Chart.PackageDigest))) {
-		return PublicationResult{}, domain.NewError(422, "CHART_DIGEST_INVALID", "发行版本、Chart 版本或摘要格式无效")
-	}
-	expectedOCIRef := "oci://" + s.chartRegistryHost + "/charts/" + input.AppID
-	if strings.TrimSpace(input.Version.Chart.OCIRef) != expectedOCIRef {
-		return PublicationResult{}, domain.NewError(422, "CHART_OCI_REF_INVALID", "Chart OCI 引用必须指向受控 Registry 中同名应用")
-	}
-	seen := map[string]bool{}
-	for _, organizationID := range input.OrganizationIDs {
-		if organizationID == "" || seen[organizationID] {
-			return PublicationResult{}, domain.NewError(422, "ORGANIZATION_SCOPE_INVALID", "授权组织不能为空或重复")
-		}
-		seen[organizationID] = true
-		organization, err := s.repository.ManagedOrganization(ctx, organizationID)
-		if err != nil || organization.Organization.Status != "正常" {
-			return PublicationResult{}, domain.NewError(422, "ORGANIZATION_SCOPE_INVALID", "授权组织不存在或不可用")
-		}
 	}
 	var app domain.App
 	managed, err := s.repository.ManagedApp(ctx, input.AppID)
@@ -344,4 +295,62 @@ func (s *Service) changePublishedAppGrants(ctx context.Context, subject string, 
 		}
 	}
 	return PublicationGrantResult{AppID: input.AppID, OrganizationIDs: input.OrganizationIDs}, nil
+}
+
+// preflightPublication rejects deterministic listing, version and scope errors
+// before any record is created or any external system is touched.
+func (s *Service) preflightPublication(ctx context.Context, input *PublicationInput) error {
+	input.AppID = strings.TrimSpace(input.AppID)
+	if !appIDPattern.MatchString(input.AppID) || len(input.OrganizationIDs) == 0 {
+		return domain.NewError(422, "PUBLICATION_INPUT_INVALID", "应用 ID 或授权组织范围无效")
+	}
+	if strings.TrimSpace(input.Category) == "" || strings.TrimSpace(input.Developer) == "" || strings.TrimSpace(input.Summary) == "" || strings.TrimSpace(input.Description) == "" {
+		return domain.NewError(422, "LISTING_INCOMPLETE", "缺少分类、开发者、简介、介绍、截图或功能亮点")
+	}
+	// VerdantFlare's own apps need no third-party license evidence; when a
+	// license is supplied it must still be complete.
+	licenseOptional := strings.TrimSpace(input.Developer) == selfDeveloper && input.Version.LicenseID == "" && input.Version.LicenseURL == ""
+	if input.Version.Chart == nil || input.Version.SourceRevision == "" || (input.Version.SourceURL != "" && !validEditorialURL(input.Version.SourceURL)) ||
+		(!licenseOptional && (input.Version.LicenseID == "" || !validEditorialURL(input.Version.LicenseURL))) {
+		return domain.NewError(422, "VERSION_EVIDENCE_REQUIRED", "固定 OCI 包与源码 revision 为必填；第三方应用还须提供许可证标识与 HTTPS 证据")
+	}
+	if input.Version.Chart.PackageDigest == "" || input.Version.Chart.ManifestDigest == "" {
+		return domain.NewError(422, "CHART_DIGEST_REQUIRED", "须提供已发行 OCI Chart 的双摘要")
+	}
+	// Reject deterministic listing and artifact input errors before creating a
+	// managed app. OCI readback can still fail later; the caller then resumes
+	// against the persisted revision instead of assuming another create.
+	preview := domain.App{ID: input.AppID, Name: input.Name, Category: input.Category, Summary: input.Summary, Description: input.Description, Developer: input.Developer}
+	if input.PublicIconURL != nil {
+		preview.PublicIconURL = *input.PublicIconURL
+	}
+	if input.Showcase != nil {
+		preview.Showcase = *input.Showcase
+	}
+	if err := validateEditorialFields(preview); err != nil {
+		return err
+	}
+	if readiness := publicationReadiness(preview); !readiness.Ready {
+		return domain.NewError(422, "LISTING_INCOMPLETE", "发布资料不完整："+strings.Join(readiness.MissingFields, ", "))
+	}
+	if !chartVersionPattern.MatchString(strings.TrimSpace(input.Version.Version)) || !chartVersionPattern.MatchString(strings.TrimSpace(input.Version.Chart.Version)) ||
+		!imageDigestPattern.MatchString(strings.ToLower(strings.TrimSpace(input.Version.Chart.ManifestDigest))) || !imageDigestPattern.MatchString(strings.ToLower(strings.TrimSpace(input.Version.Chart.PackageDigest))) {
+		return domain.NewError(422, "CHART_DIGEST_INVALID", "发行版本、Chart 版本或摘要格式无效")
+	}
+	expectedOCIRef := "oci://" + s.chartRegistryHost + "/charts/" + input.AppID
+	if strings.TrimSpace(input.Version.Chart.OCIRef) != expectedOCIRef {
+		return domain.NewError(422, "CHART_OCI_REF_INVALID", "Chart OCI 引用必须指向受控 Registry 中同名应用")
+	}
+	seen := map[string]bool{}
+	for _, organizationID := range input.OrganizationIDs {
+		if organizationID == "" || seen[organizationID] {
+			return domain.NewError(422, "ORGANIZATION_SCOPE_INVALID", "授权组织不能为空或重复")
+		}
+		seen[organizationID] = true
+		organization, err := s.repository.ManagedOrganization(ctx, organizationID)
+		if err != nil || organization.Organization.Status != "正常" {
+			return domain.NewError(422, "ORGANIZATION_SCOPE_INVALID", "授权组织不存在或不可用")
+		}
+	}
+	return nil
 }
