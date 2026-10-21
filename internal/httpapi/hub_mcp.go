@@ -154,20 +154,6 @@ func (s *Server) callHubMCPTool(r *http.Request, subject, name string, arguments
 			return nil, err
 		}
 		return s.service.PublishRegisteredOCI(ctx, subject, input)
-	case "app_publish.submit_chart":
-		var input control.SubmitChartInput
-		if err := json.Unmarshal(arguments, &input); err != nil {
-			return nil, err
-		}
-		return s.service.SubmitChart(ctx, subject, input)
-	case "app_publish.status":
-		var input struct {
-			TaskID string `json:"taskId"`
-		}
-		if err := json.Unmarshal(arguments, &input); err != nil {
-			return nil, err
-		}
-		return s.service.PublicationTaskStatus(ctx, subject, input.TaskID)
 	case "app_publish.update":
 		var input control.PublicationUpdateInput
 		if err := json.Unmarshal(arguments, &input); err != nil {
@@ -226,16 +212,6 @@ func hubMCPTools() []hubMCPTool {
 	}
 	publication := map[string]any{"appId": stringField, "groupId": stringField, "showcase": object(showcaseProperties, "screenshots", "highlights"),
 		"version": version, "organizationIds": stringsField, "expectedRevision": integerField}
-	submitVersion := object(map[string]any{
-		"version": stringField, "releaseNotes": stringField, "upstreamVersion": stringField, "publisher": stringField,
-		"sourceUrl": stringField, "licenseId": stringField, "licenseUrl": stringField,
-	}, "version")
-	submit := map[string]any{"chartArchive": stringField, "version": submitVersion}
-	for key, value := range publication {
-		if key != "version" {
-			submit[key] = value
-		}
-	}
 	update := map[string]any{"appId": stringField, "expectedRevision": integerField, "showcase": object(showcaseProperties)}
 	for key, value := range editorial {
 		publication[key] = value
@@ -250,8 +226,6 @@ func hubMCPTools() []hubMCPTool {
 		{Name: "app_publish.get", Description: "读取单个应用的资料、修订、版本与启停状态；更新、停用前先读取修订。", InputSchema: appID},
 		{Name: "app_publish.readiness", Description: "查询已有应用的上架必填字段缺口。", InputSchema: appID},
 		{Name: "app_publish.publish", Description: "以完整资料快照、已发行固定 OCI Chart 双摘要和组织权益一次发布到 Station 目录；新建传 expectedRevision=0；开发者为 VerdantFlare 的自研应用可省略 licenseId/licenseUrl，第三方应用必填。不会安装应用。", InputSchema: object(publication, "appId", "name", "groupId", "category", "summary", "description", "developer", "showcase", "version", "organizationIds")},
-		{Name: "app_publish.submit_chart", Description: "提交 Chart 源码（<appId>/ 目录的 .tgz，Base64）与完整资料：写入 Market dev、触发 Chart 发行，再自动完成固定 OCI 发布；返回 taskId，用 status 回查。Chart.yaml 的 name 须等于 appId，appVersion 须等于 version.version。", InputSchema: object(submit, "appId", "name", "groupId", "category", "summary", "description", "developer", "showcase", "version", "organizationIds", "chartArchive")},
-		{Name: "app_publish.status", Description: "按 taskId 回查源码发行任务：building、published、released 或 failed，并给出 commit、运行与双摘要。查询时推进未完成阶段。", InputSchema: object(map[string]any{"taskId": stringField}, "taskId")},
 		{Name: "app_publish.update", Description: "局部更新已有应用资料，只修改传入字段，传空字符串清空可选字段；不改版本、启停或权益。", InputSchema: object(update, "appId", "expectedRevision")},
 		{Name: "app_publish.disable", Description: "停用分发：应用退出 Station 目录，已安装实例不受影响；须提供原因。", InputSchema: state},
 		{Name: "app_publish.enable", Description: "恢复分发：复核资料与发布版本后重新进入 Station 目录。", InputSchema: state},

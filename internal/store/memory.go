@@ -27,7 +27,6 @@ type Memory struct {
 	modelRuns     map[string]domain.ModelExperienceRun
 	apiKeys       map[string]domain.APIKey
 	mcpTokens     map[string]domain.MCPToken
-	pubTasks      map[string]domain.PublicationTask
 	models        []domain.Model
 	publicModels  map[string]domain.PublicModel
 	modelIcons    map[string]domain.ModelProviderIcon
@@ -591,34 +590,4 @@ func withMCPTokenStatus(token domain.MCPToken, now time.Time) domain.MCPToken {
 		token.Status = "有效"
 	}
 	return token
-}
-
-func (m *Memory) CreatePublicationTask(_ context.Context, task domain.PublicationTask) (domain.PublicationTask, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.pubTasks == nil {
-		m.pubTasks = map[string]domain.PublicationTask{}
-	}
-	m.pubTasks[task.ID] = task
-	return task, nil
-}
-
-func (m *Memory) PublicationTask(_ context.Context, id string) (domain.PublicationTask, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	task, ok := m.pubTasks[id]
-	if !ok {
-		return domain.PublicationTask{}, domain.NewError(404, "TASK_NOT_FOUND", "发布任务不存在")
-	}
-	return task, nil
-}
-
-func (m *Memory) UpdatePublicationTask(ctx context.Context, task domain.PublicationTask) (domain.PublicationTask, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.pubTasks[task.ID]; !ok {
-		return domain.PublicationTask{}, domain.NewError(404, "TASK_NOT_FOUND", "发布任务不存在")
-	}
-	m.pubTasks[task.ID] = task
-	return task, nil
 }

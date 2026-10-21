@@ -29,7 +29,6 @@ type persistedState struct {
 	ModelRuns     map[string]domain.ModelExperienceRun    `json:"modelRuns"`
 	APIKeys       map[string]persistedAPIKey              `json:"apiKeys"`
 	MCPTokens     map[string]persistedMCPToken            `json:"mcpTokens,omitempty"`
-	PubTasks      map[string]persistedPublicationTask     `json:"publicationTasks,omitempty"`
 	Models        []domain.Model                          `json:"models"`
 	PublicModels  map[string]domain.PublicModel           `json:"publicModels"`
 	ModelIcons    map[string]domain.ModelProviderIcon     `json:"modelIcons,omitempty"`
@@ -51,12 +50,6 @@ type persistedMCPToken struct {
 	domain.MCPToken
 	LoginSubject string   `json:"loginSubject"`
 	SecretHash   [32]byte `json:"secretHash"`
-}
-
-type persistedPublicationTask struct {
-	domain.PublicationTask
-	Submitter string          `json:"submitter"`
-	Input     json.RawMessage `json:"input"`
 }
 
 func OpenPostgres(databaseURL string, maxOpen, maxIdle int, _ time.Time) (*Postgres, error) {
@@ -140,13 +133,9 @@ func encodeMemory(m *Memory) ([]byte, error) {
 	for id, token := range m.mcpTokens {
 		tokens[id] = persistedMCPToken{MCPToken: token, LoginSubject: token.LoginSubject, SecretHash: token.SecretHash}
 	}
-	pubTasks := make(map[string]persistedPublicationTask, len(m.pubTasks))
-	for id, task := range m.pubTasks {
-		pubTasks[id] = persistedPublicationTask{PublicationTask: task, Submitter: task.Submitter, Input: task.Input}
-	}
 	raw, err := json.Marshal(persistedState{
 		Users: m.users, Organizations: m.organizations, Apps: m.apps, AppVersions: m.appVersions, StationGrants: m.stationGrants, Entitlements: m.entitlements,
-		Sessions: m.sessions, ModelRuns: m.modelRuns, APIKeys: keys, MCPTokens: tokens, PubTasks: pubTasks, Models: m.models, PublicModels: m.publicModels, ModelIcons: m.modelIcons, Tasks: m.tasks,
+		Sessions: m.sessions, ModelRuns: m.modelRuns, APIKeys: keys, MCPTokens: tokens, Models: m.models, PublicModels: m.publicModels, ModelIcons: m.modelIcons, Tasks: m.tasks,
 		Members: m.members, Billing: m.billing, Releases: m.releases, OpsOrgs: m.opsOrgs,
 	})
 	if err != nil {
@@ -175,15 +164,9 @@ func decodeMemory(raw []byte) (*Memory, error) {
 		token.LoginSubject, token.SecretHash = persisted.LoginSubject, persisted.SecretHash
 		tokens[id] = token
 	}
-	pubTasks := make(map[string]domain.PublicationTask, len(state.PubTasks))
-	for id, persisted := range state.PubTasks {
-		task := persisted.PublicationTask
-		task.Submitter, task.Input = persisted.Submitter, persisted.Input
-		pubTasks[id] = task
-	}
 	return &Memory{
 		users: state.Users, organizations: state.Organizations, apps: state.Apps, appVersions: state.AppVersions, stationGrants: state.StationGrants,
-		entitlements: state.Entitlements, sessions: state.Sessions, modelRuns: state.ModelRuns, apiKeys: keys, mcpTokens: tokens, pubTasks: pubTasks,
+		entitlements: state.Entitlements, sessions: state.Sessions, modelRuns: state.ModelRuns, apiKeys: keys, mcpTokens: tokens,
 		models: state.Models, publicModels: state.PublicModels, modelIcons: state.ModelIcons, tasks: state.Tasks, members: state.Members, billing: state.Billing,
 		releases: state.Releases, opsOrgs: state.OpsOrgs,
 	}, nil
@@ -381,20 +364,4 @@ func (p *Postgres) MCPTokenBySecretHash(ctx context.Context, hash [32]byte) (dom
 }
 func (p *Postgres) TouchMCPToken(ctx context.Context, tokenID string, at time.Time) error {
 	return p.mutate(ctx, func(m *Memory) error { return m.TouchMCPToken(ctx, tokenID, at) })
-}
-
-func (p *Postgres) CreatePublicationTask(ctx context.Context, task domain.PublicationTask) (result domain.PublicationTask, err error) {
-	err = p.mutate(ctx, func(m *Memory) error { var e error; result, e = m.CreatePublicationTask(ctx, task); return e })
-	return
-}
-func (p *Postgres) PublicationTask(ctx context.Context, id string) (domain.PublicationTask, error) {
-	m, err := p.read(ctx)
-	if err != nil {
-		return domain.PublicationTask{}, err
-	}
-	return m.PublicationTask(ctx, id)
-}
-func (p *Postgres) UpdatePublicationTask(ctx context.Context, task domain.PublicationTask) (result domain.PublicationTask, err error) {
-	err = p.mutate(ctx, func(m *Memory) error { var e error; result, e = m.UpdatePublicationTask(ctx, task); return e })
-	return
 }

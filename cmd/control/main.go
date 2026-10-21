@@ -63,9 +63,6 @@ func main() {
 	}
 	service := control.NewService(repository, modelGateway)
 	service.SetRequiredInstallGrantApps(configuration.RequiredInstallGrantApps)
-	if configuration.MarketGitHubToken != "" {
-		service.SetMarketRepository(&control.GitHubMarket{APIURL: configuration.MarketGitHubAPI, Repo: configuration.MarketGitHubRepo, Token: configuration.MarketGitHubToken})
-	}
 	if configuration.LoginDirectoryBaseURL != "" {
 		directory, err := gateway.NewLoginDirectoryClient(configuration.LoginDirectoryBaseURL, configuration.LoginDirectoryToken)
 		if err != nil {

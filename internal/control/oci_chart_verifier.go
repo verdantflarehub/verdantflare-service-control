@@ -342,8 +342,9 @@ func (s *Service) fetchRegistryManifest(ctx context.Context, appID, reference, e
 	if err != nil || len(raw) == 0 || len(raw) > maxOCIManifestBytes {
 		return nil, domain.NewError(502, "CHART_DIGEST_MISMATCH", "OCI Manifest 内容无效或超限")
 	}
-	// An empty expectation resolves a tag; callers then verify the digests.
-	if expectedDigest != "" && digestOf(raw) != expectedDigest {
+	sum := sha256.Sum256(raw)
+	actualDigest := "sha256:" + hex.EncodeToString(sum[:])
+	if actualDigest != expectedDigest {
 		return nil, domain.NewError(502, "CHART_DIGEST_MISMATCH", "OCI Manifest 实际 SHA-256 与提交的 manifestDigest 不一致")
 	}
 	return raw, nil
@@ -510,9 +511,4 @@ func extractAndValidateChartLogo(files map[string][]byte, fallback *domain.LogoR
 		return &copyLogo, nil, nil
 	}
 	return nil, nil, nil
-}
-
-func digestOf(raw []byte) string {
-	sum := sha256.Sum256(raw)
-	return "sha256:" + hex.EncodeToString(sum[:])
 }

@@ -125,7 +125,7 @@ func newTestServerWithOCIRegistry(t *testing.T, artifacts map[string]testOCIRegi
 	return newTestServerWithOCIRegistryConfig(t, testConfig(), artifacts, blobs)
 }
 
-func newTestServerWithOCIRegistryConfig(t *testing.T, cfg config.Config, artifacts map[string]testOCIRegistryArtifact, blobs map[string][]byte, configure ...func(*control.Service)) *httptest.Server {
+func newTestServerWithOCIRegistryConfig(t *testing.T, cfg config.Config, artifacts map[string]testOCIRegistryArtifact, blobs map[string][]byte) *httptest.Server {
 	t.Helper()
 	regMux := http.NewServeMux()
 	regMux.HandleFunc("GET /v2/charts/{appID}/manifests/{ref}", func(w http.ResponseWriter, r *http.Request) {
@@ -159,9 +159,6 @@ func newTestServerWithOCIRegistryConfig(t *testing.T, cfg config.Config, artifac
 	cfg.ChartRegistryInternalURL = regServer.URL
 	service := control.NewService(store.NewMemorySeeded(time.Date(2026, 7, 19, 8, 0, 0, 0, time.UTC)))
 	service.SetChartRegistry("registry.verdantflare.ai", regServer.URL, regServer.Client())
-	for _, apply := range configure {
-		apply(service)
-	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(httpapi.New(cfg, service, logger))
 	t.Cleanup(srv.Close)

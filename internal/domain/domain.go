@@ -296,26 +296,6 @@ type MCPToken struct {
 	SecretHash   [32]byte   `json:"-"`
 }
 
-// PublicationTask tracks one chart-source submission from the Market commit
-// through the Actions release to the Station catalog.
-type PublicationTask struct {
-	ID             string          `json:"taskId"`
-	Submitter      string          `json:"-"`
-	AppID          string          `json:"appId"`
-	Version        string          `json:"version"`
-	ChartVersion   string          `json:"chartVersion"`
-	Stage          string          `json:"stage"`
-	Error          string          `json:"error,omitempty"`
-	CommitSHA      string          `json:"commitSha,omitempty"`
-	RunID          int64           `json:"runId,omitempty"`
-	RunURL         string          `json:"runUrl,omitempty"`
-	ManifestDigest string          `json:"manifestDigest,omitempty"`
-	PackageDigest  string          `json:"packageDigest,omitempty"`
-	CreatedAt      time.Time       `json:"createdAt"`
-	UpdatedAt      time.Time       `json:"updatedAt"`
-	Input          json.RawMessage `json:"-"`
-}
-
 type APITask struct {
 	ID             string `json:"id"`
 	OrganizationID string `json:"organizationId,omitempty"`
