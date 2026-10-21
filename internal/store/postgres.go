@@ -2,9 +2,7 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -30,6 +28,7 @@ type persistedState struct {
 	Sessions      map[string]domain.ExperienceSession     `json:"sessions"`
 	ModelRuns     map[string]domain.ModelExperienceRun    `json:"modelRuns"`
 	APIKeys       map[string]persistedAPIKey              `json:"apiKeys"`
+	MCPTokens     map[string]persistedMCPToken            `json:"mcpTokens,omitempty"`
 	Models        []domain.Model                          `json:"models"`
 	PublicModels  map[string]domain.PublicModel           `json:"publicModels"`
 	ModelIcons    map[string]domain.ModelProviderIcon     `json:"modelIcons,omitempty"`
@@ -45,6 +44,12 @@ type persistedState struct {
 type persistedAPIKey struct {
 	domain.APIKey
 	SecretHash [32]byte `json:"secretHash"`
+}
+
+type persistedMCPToken struct {
+	domain.MCPToken
+	LoginSubject string   `json:"loginSubject"`
+	SecretHash   [32]byte `json:"secretHash"`
 }
 
 func OpenPostgres(databaseURL string, maxOpen, maxIdle int, _ time.Time) (*Postgres, error) {
@@ -78,27 +83,6 @@ func OpenPostgres(databaseURL string, maxOpen, maxIdle int, _ time.Time) (*Postg
 }
 
 func (p *Postgres) Close() error { return p.db.Close() }
-
-// ClaimPublicationNonce is atomic across Control replicas. Missing migrations
-// and database errors fail closed at the HTTP delegation boundary.
-func (p *Postgres) ClaimPublicationNonce(ctx context.Context, key string, ttl time.Duration) (bool, error) {
-	digest := sha256.Sum256([]byte(key))
-	var claimed string
-	err := p.db.QueryRowContext(ctx, `
-		INSERT INTO control_publication_nonces (digest, expires_at)
-		VALUES ($1, NOW() + ($2 * INTERVAL '1 second'))
-		ON CONFLICT (digest) DO UPDATE SET expires_at = EXCLUDED.expires_at
-		WHERE control_publication_nonces.expires_at <= NOW()
-		RETURNING digest`, hex.EncodeToString(digest[:]), ttl.Seconds()).Scan(&claimed)
-	if err == sql.ErrNoRows {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("claim publication nonce: %w", err)
-	}
-	_, _ = p.db.ExecContext(ctx, `DELETE FROM control_publication_nonces WHERE expires_at < NOW() - INTERVAL '1 day'`)
-	return true, nil
-}
 
 func (p *Postgres) read(ctx context.Context) (*Memory, error) {
 	var raw []byte
@@ -145,9 +129,13 @@ func encodeMemory(m *Memory) ([]byte, error) {
 	for id, key := range m.apiKeys {
 		keys[id] = persistedAPIKey{APIKey: key, SecretHash: key.SecretHash}
 	}
+	tokens := make(map[string]persistedMCPToken, len(m.mcpTokens))
+	for id, token := range m.mcpTokens {
+		tokens[id] = persistedMCPToken{MCPToken: token, LoginSubject: token.LoginSubject, SecretHash: token.SecretHash}
+	}
 	raw, err := json.Marshal(persistedState{
 		Users: m.users, Organizations: m.organizations, Apps: m.apps, AppVersions: m.appVersions, StationGrants: m.stationGrants, Entitlements: m.entitlements,
-		Sessions: m.sessions, ModelRuns: m.modelRuns, APIKeys: keys, Models: m.models, PublicModels: m.publicModels, ModelIcons: m.modelIcons, Tasks: m.tasks,
+		Sessions: m.sessions, ModelRuns: m.modelRuns, APIKeys: keys, MCPTokens: tokens, Models: m.models, PublicModels: m.publicModels, ModelIcons: m.modelIcons, Tasks: m.tasks,
 		Members: m.members, Billing: m.billing, Releases: m.releases, OpsOrgs: m.opsOrgs,
 	})
 	if err != nil {
@@ -170,9 +158,15 @@ func decodeMemory(raw []byte) (*Memory, error) {
 		}
 		keys[id] = key
 	}
+	tokens := make(map[string]domain.MCPToken, len(state.MCPTokens))
+	for id, persisted := range state.MCPTokens {
+		token := persisted.MCPToken
+		token.LoginSubject, token.SecretHash = persisted.LoginSubject, persisted.SecretHash
+		tokens[id] = token
+	}
 	return &Memory{
 		users: state.Users, organizations: state.Organizations, apps: state.Apps, appVersions: state.AppVersions, stationGrants: state.StationGrants,
-		entitlements: state.Entitlements, sessions: state.Sessions, modelRuns: state.ModelRuns, apiKeys: keys,
+		entitlements: state.Entitlements, sessions: state.Sessions, modelRuns: state.ModelRuns, apiKeys: keys, mcpTokens: tokens,
 		models: state.Models, publicModels: state.PublicModels, modelIcons: state.ModelIcons, tasks: state.Tasks, members: state.Members, billing: state.Billing,
 		releases: state.Releases, opsOrgs: state.OpsOrgs,
 	}, nil
@@ -345,4 +339,29 @@ func (p *Postgres) ListOperationsOrganizations(ctx context.Context) ([]domain.Op
 		return nil, err
 	}
 	return m.ListOperationsOrganizations(ctx)
+}
+
+func (p *Postgres) ListMCPTokens(ctx context.Context, subject string) ([]domain.MCPToken, error) {
+	m, err := p.read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return m.ListMCPTokens(ctx, subject)
+}
+func (p *Postgres) CreateMCPToken(ctx context.Context, token domain.MCPToken) (result domain.MCPToken, err error) {
+	err = p.mutate(ctx, func(m *Memory) error { var e error; result, e = m.CreateMCPToken(ctx, token); return e })
+	return
+}
+func (p *Postgres) RevokeMCPToken(ctx context.Context, subject, tokenID string, at time.Time) error {
+	return p.mutate(ctx, func(m *Memory) error { return m.RevokeMCPToken(ctx, subject, tokenID, at) })
+}
+func (p *Postgres) MCPTokenBySecretHash(ctx context.Context, hash [32]byte) (domain.MCPToken, error) {
+	m, err := p.read(ctx)
+	if err != nil {
+		return domain.MCPToken{}, err
+	}
+	return m.MCPTokenBySecretHash(ctx, hash)
+}
+func (p *Postgres) TouchMCPToken(ctx context.Context, tokenID string, at time.Time) error {
+	return p.mutate(ctx, func(m *Memory) error { return m.TouchMCPToken(ctx, tokenID, at) })
 }

@@ -126,3 +126,12 @@ func (p *Postgres) GrantAppToOrganization(ctx context.Context, organizationID, a
 	})
 	return result, err
 }
+
+func (p *Postgres) RevokeAppFromOrganization(ctx context.Context, organizationID, appID string, expectedVersion int) (result domain.ManagedOrganization, err error) {
+	err = p.mutate(ctx, func(m *Memory) error {
+		var e error
+		result, e = m.RevokeAppFromOrganization(ctx, organizationID, appID, expectedVersion)
+		return e
+	})
+	return
+}

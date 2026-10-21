@@ -78,6 +78,9 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("POST /api/control/settings/members/{memberID}/transfer", server.transferCurrentOrganizationMember)
 	mux.HandleFunc("PATCH /api/control/settings/members/{memberID}", server.updateMember)
 	mux.HandleFunc("GET /api/control/settings/billing", server.getBilling)
+	mux.HandleFunc("GET /api/control/settings/mcp-tokens", server.listMCPTokens)
+	mux.HandleFunc("POST /api/control/settings/mcp-tokens", server.createMCPToken)
+	mux.HandleFunc("DELETE /api/control/settings/mcp-tokens/{tokenID}", server.revokeMCPToken)
 
 	mux.HandleFunc("GET /api/control/ops/releases", server.listReleases)
 	mux.HandleFunc("GET /api/control/public/catalog", server.publicCatalog)
@@ -114,7 +117,7 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("GET /api/control/station/v2/apps.yaml", server.stationAppsYAMLV2)
 	mux.HandleFunc("GET /api/control/station/v2/apps/{appID}/versions/{version}", server.stationAppVersionV2)
 	mux.HandleFunc("GET /api/control/station/v2/apps/{appID}/versions/{version}/install-grant/{organizationID}", server.stationInstallGrantV2)
-	mux.HandleFunc("POST /api/control/internal/studio-publish/mcp", server.studioPublishMCP)
+	mux.HandleFunc("POST /api/control/mcp", server.hubMCP)
 
 	mux.HandleFunc("POST /api/control/ops/organizations", server.createManagedOrganization)
 	mux.HandleFunc("GET /api/control/ops/organizations/{organizationID}", server.getManagedOrganization)
@@ -374,19 +377,10 @@ func (s *Server) subject(writer http.ResponseWriter, request *http.Request) (str
 }
 
 func (s *Server) decode(writer http.ResponseWriter, request *http.Request, target any) bool {
-	limit := int64(maxBodyBytes)
-	if request.URL.Path == "/api/control/internal/studio-publish/mcp" {
-		limit = maxPublicationBodyBytes
-	}
-	request.Body = http.MaxBytesReader(writer, request.Body, limit)
+	request.Body = http.MaxBytesReader(writer, request.Body, maxBodyBytes)
 	decoder := json.NewDecoder(request.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
-		var tooLarge *http.MaxBytesError
-		if request.URL.Path == "/api/control/internal/studio-publish/mcp" && errors.As(err, &tooLarge) {
-			s.writeError(writer, request, domain.NewError(413, "REQUEST_TOO_LARGE", "请求体超过允许大小"))
-			return false
-		}
 		s.writeError(writer, request, domain.NewError(400, "invalid_json", "请求体不是有效 JSON 或包含未知字段"))
 		return false
 	}

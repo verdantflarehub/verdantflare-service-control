@@ -94,10 +94,6 @@ func (s *Service) SetRequiredInstallGrantApps(appIDs []string) {
 	s.requiredInstallGrantApps = allowed
 }
 
-func (s *Service) ClaimPublicationNonce(ctx context.Context, key string, ttl time.Duration) (bool, error) {
-	return s.repository.ClaimPublicationNonce(ctx, key, ttl)
-}
-
 var gatewayRequestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,80}$`)
 
 func NewService(repository store.Repository, gateways ...ModelGateway) *Service {

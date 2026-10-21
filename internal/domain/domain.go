@@ -281,6 +281,21 @@ type APIKey struct {
 	SecretHash     [32]byte   `json:"-"`
 }
 
+// MCPToken lets an AI tool call the Hub Market MCP as the Login user who
+// issued it. Only the SHA-256 of the secret is kept.
+type MCPToken struct {
+	ID           string     `json:"id"`
+	LoginSubject string     `json:"-"`
+	Name         string     `json:"name"`
+	Prefix       string     `json:"prefix"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	ExpiresAt    *time.Time `json:"expiresAt,omitempty"`
+	LastUsedAt   *time.Time `json:"lastUsedAt,omitempty"`
+	RevokedAt    *time.Time `json:"revokedAt,omitempty"`
+	Status       string     `json:"status"`
+	SecretHash   [32]byte   `json:"-"`
+}
+
 type APITask struct {
 	ID             string `json:"id"`
 	OrganizationID string `json:"organizationId,omitempty"`

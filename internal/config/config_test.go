@@ -59,15 +59,9 @@ func TestStationMTLSRequiresCompleteSeparateListener(t *testing.T) {
 	}
 }
 
-func TestPublishingRequiresInstallGrantPolicy(t *testing.T) {
+func TestInstallGrantPolicyIsParsed(t *testing.T) {
 	t.Setenv("CONTROL_ENV", "development")
-	t.Setenv("CONTROL_STUDIO_PUBLISH_HMAC_KEY", "test-only-key-with-at-least-thirty-two-characters")
-	t.Setenv("CONTROL_STUDIO_PUBLISH_BINDINGS", `[{"stationUserId":"station-user","stationOrganizationId":"station-org","loginSubject":"login-user","controlOrganizationId":"org-test"}]`)
-	t.Setenv("CONTROL_INSTALL_GRANT_REQUIRED_APPS", "")
-	if _, err := Load(); err == nil {
-		t.Fatal("publishing without install grant policy was accepted")
-	}
-	t.Setenv("CONTROL_INSTALL_GRANT_REQUIRED_APPS", "app-publishing,private-admin")
+	t.Setenv("CONTROL_INSTALL_GRANT_REQUIRED_APPS", "private-admin,internal-tool")
 	configuration, err := Load()
 	if err != nil || len(configuration.RequiredInstallGrantApps) != 2 {
 		t.Fatalf("configured policy = %+v, %v", configuration.RequiredInstallGrantApps, err)

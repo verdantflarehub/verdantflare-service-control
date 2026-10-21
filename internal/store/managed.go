@@ -365,3 +365,21 @@ func (m *Memory) GrantAppToOrganization(_ context.Context, organizationID, appID
 	}
 	return m.managedOrganizationLocked(organizationID)
 }
+
+func (m *Memory) RevokeAppFromOrganization(_ context.Context, organizationID, appID string, expectedVersion int) (domain.ManagedOrganization, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	org, ok := m.organizations[organizationID]
+	if !ok {
+		return domain.ManagedOrganization{}, domain.NewError(404, "organization_not_found", "组织不存在")
+	}
+	if org.EntitlementVersion != expectedVersion {
+		return domain.ManagedOrganization{}, domain.NewError(409, "entitlement_version_conflict", "组织权益已改变，请刷新后重试")
+	}
+	if m.entitlements[organizationID][appID] {
+		delete(m.entitlements[organizationID], appID)
+		org.EntitlementVersion++
+		m.organizations[organizationID] = org
+	}
+	return m.managedOrganizationLocked(organizationID)
+}

@@ -8,7 +8,6 @@ import (
 )
 
 type Repository interface {
-	ClaimPublicationNonce(context.Context, string, time.Duration) (bool, error)
 	CenterContext(context.Context, string) (domain.CenterContext, error)
 	SetActiveOrganization(context.Context, string, string) (domain.CenterContext, error)
 	ActiveOrganization(context.Context, string) (domain.Organization, []string, string, error)
@@ -67,4 +66,11 @@ type Repository interface {
 	ManagedOrganization(context.Context, string) (domain.ManagedOrganization, error)
 	UpdateManagedOrganization(context.Context, string, domain.Organization, []string, int) (domain.ManagedOrganization, error)
 	GrantAppToOrganization(context.Context, string, string, int) (domain.ManagedOrganization, error)
+	RevokeAppFromOrganization(context.Context, string, string, int) (domain.ManagedOrganization, error)
+
+	ListMCPTokens(context.Context, string) ([]domain.MCPToken, error)
+	CreateMCPToken(context.Context, domain.MCPToken) (domain.MCPToken, error)
+	RevokeMCPToken(context.Context, string, string, time.Time) error
+	MCPTokenBySecretHash(context.Context, [32]byte) (domain.MCPToken, error)
+	TouchMCPToken(context.Context, string, time.Time) error
 }

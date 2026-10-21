@@ -92,14 +92,3 @@ func (s *Service) AppPublicationReadiness(ctx context.Context, subject, appID st
 	}
 	return publicationReadiness(managed.App), nil
 }
-
-func (s *Service) AssertDelegatedPublisher(ctx context.Context, subject, expectedOrganizationID string) error {
-	organization, roles, _, err := s.activeOrganization(ctx, subject)
-	if err != nil {
-		return err
-	}
-	if organization.OrganizationID != expectedOrganizationID || !hasAnyRole(roles, "app_ops_admin") {
-		return domain.NewError(403, "PUBLISHER_FORBIDDEN", "当前发布者的组织或运营角色无效")
-	}
-	return nil
-}

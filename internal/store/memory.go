@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,9 +14,8 @@ import (
 )
 
 type Memory struct {
-	mu                sync.RWMutex
-	publicationNonces map[string]time.Time
-	surveys           map[string]domain.SurveyState
+	mu      sync.RWMutex
+	surveys map[string]domain.SurveyState
 
 	users         map[string]domain.CenterUser
 	organizations map[string]domain.Organization
@@ -26,6 +26,7 @@ type Memory struct {
 	sessions      map[string]domain.ExperienceSession
 	modelRuns     map[string]domain.ModelExperienceRun
 	apiKeys       map[string]domain.APIKey
+	mcpTokens     map[string]domain.MCPToken
 	models        []domain.Model
 	publicModels  map[string]domain.PublicModel
 	modelIcons    map[string]domain.ModelProviderIcon
@@ -34,25 +35,6 @@ type Memory struct {
 	billing       map[string]domain.BillingSummary
 	releases      []domain.Release
 	opsOrgs       []domain.OperationsOrganization
-}
-
-func (m *Memory) ClaimPublicationNonce(_ context.Context, key string, ttl time.Duration) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.publicationNonces == nil {
-		m.publicationNonces = make(map[string]time.Time)
-	}
-	now := time.Now()
-	for nonce, until := range m.publicationNonces {
-		if !until.After(now) {
-			delete(m.publicationNonces, nonce)
-		}
-	}
-	if _, exists := m.publicationNonces[key]; exists {
-		return false, nil
-	}
-	m.publicationNonces[key] = now.Add(ttl)
-	return true, nil
 }
 
 // NewMemoryBootstrap creates only the operational identity needed to provision
@@ -537,4 +519,75 @@ func membershipFor(user domain.CenterUser, organizationID string) (domain.Member
 
 func newID(prefix string) string {
 	return fmt.Sprintf("%s_%X", prefix, time.Now().UnixNano())
+}
+
+func (m *Memory) ListMCPTokens(_ context.Context, subject string) ([]domain.MCPToken, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	now := time.Now().UTC()
+	result := make([]domain.MCPToken, 0)
+	for _, token := range m.mcpTokens {
+		if token.LoginSubject == subject {
+			result = append(result, withMCPTokenStatus(token, now))
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
+func (m *Memory) CreateMCPToken(_ context.Context, token domain.MCPToken) (domain.MCPToken, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.mcpTokens == nil {
+		m.mcpTokens = map[string]domain.MCPToken{}
+	}
+	m.mcpTokens[token.ID] = token
+	return withMCPTokenStatus(token, time.Now().UTC()), nil
+}
+
+func (m *Memory) RevokeMCPToken(_ context.Context, subject, tokenID string, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	token, ok := m.mcpTokens[tokenID]
+	if !ok || token.LoginSubject != subject {
+		return domain.NewError(404, "mcp_token_not_found", "MCP 访问令牌不存在")
+	}
+	if token.RevokedAt == nil {
+		token.RevokedAt = &at
+		m.mcpTokens[tokenID] = token
+	}
+	return nil
+}
+
+func (m *Memory) MCPTokenBySecretHash(_ context.Context, hash [32]byte) (domain.MCPToken, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, token := range m.mcpTokens {
+		if subtle.ConstantTimeCompare(token.SecretHash[:], hash[:]) == 1 {
+			return withMCPTokenStatus(token, time.Now().UTC()), nil
+		}
+	}
+	return domain.MCPToken{}, domain.NewError(401, "mcp_token_invalid", "MCP 访问令牌无效")
+}
+
+func (m *Memory) TouchMCPToken(_ context.Context, tokenID string, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if token, ok := m.mcpTokens[tokenID]; ok {
+		token.LastUsedAt = &at
+		m.mcpTokens[tokenID] = token
+	}
+	return nil
+}
+
+func withMCPTokenStatus(token domain.MCPToken, now time.Time) domain.MCPToken {
+	switch {
+	case token.RevokedAt != nil:
+		token.Status = "已吊销"
+	case token.ExpiresAt != nil && !token.ExpiresAt.After(now):
+		token.Status = "已过期"
+	default:
+		token.Status = "有效"
+	}
+	return token
 }
