@@ -205,7 +205,7 @@ func hubMCPTools() []hubMCPTool {
 		"version": stringField, "chart": chart, "releaseNotes": stringField, "sourceRevision": stringField,
 		"upstreamVersion": stringField, "publisher": stringField, "sourceUrl": stringField,
 		"licenseId": stringField, "licenseUrl": stringField,
-	}, "version", "chart", "sourceRevision", "licenseId", "licenseUrl")
+	}, "version", "chart", "sourceRevision")
 	editorial := map[string]any{
 		"name": stringField, "category": stringField, "summary": stringField, "description": stringField, "developer": stringField,
 		"brand": stringField, "iconRef": stringField, "publicIconUrl": stringField, "sortOrder": integerField,
@@ -225,7 +225,7 @@ func hubMCPTools() []hubMCPTool {
 		{Name: "app_publish.organizations", Description: "列出可授予安装权益的组织及其 ID。", InputSchema: object(map[string]any{})},
 		{Name: "app_publish.get", Description: "读取单个应用的资料、修订、版本与启停状态；更新、停用前先读取修订。", InputSchema: appID},
 		{Name: "app_publish.readiness", Description: "查询已有应用的上架必填字段缺口。", InputSchema: appID},
-		{Name: "app_publish.publish", Description: "以完整资料快照、已发行固定 OCI Chart 双摘要和组织权益一次发布到 Station 目录；新建传 expectedRevision=0。不会安装应用。", InputSchema: object(publication, "appId", "name", "groupId", "category", "summary", "description", "developer", "showcase", "version", "organizationIds")},
+		{Name: "app_publish.publish", Description: "以完整资料快照、已发行固定 OCI Chart 双摘要和组织权益一次发布到 Station 目录；新建传 expectedRevision=0；开发者为 VerdantFlare 的自研应用可省略 licenseId/licenseUrl，第三方应用必填。不会安装应用。", InputSchema: object(publication, "appId", "name", "groupId", "category", "summary", "description", "developer", "showcase", "version", "organizationIds")},
 		{Name: "app_publish.update", Description: "局部更新已有应用资料，只修改传入字段，传空字符串清空可选字段；不改版本、启停或权益。", InputSchema: object(update, "appId", "expectedRevision")},
 		{Name: "app_publish.disable", Description: "停用分发：应用退出 Station 目录，已安装实例不受影响；须提供原因。", InputSchema: state},
 		{Name: "app_publish.enable", Description: "恢复分发：复核资料与发布版本后重新进入 Station 目录。", InputSchema: state},

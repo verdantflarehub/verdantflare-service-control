@@ -32,6 +32,9 @@ type PublicationInput struct {
 	ExpectedRevision int                      `json:"expectedRevision,omitempty"`
 }
 
+// selfDeveloper marks apps built and distributed by VerdantFlare itself.
+const selfDeveloper = "VerdantFlare"
+
 type PublicationResult struct {
 	App             domain.App        `json:"app"`
 	Version         domain.AppVersion `json:"version"`
@@ -86,8 +89,12 @@ func (s *Service) PublishRegisteredOCI(ctx context.Context, subject string, inpu
 	if strings.TrimSpace(input.Category) == "" || strings.TrimSpace(input.Developer) == "" || strings.TrimSpace(input.Summary) == "" || strings.TrimSpace(input.Description) == "" {
 		return PublicationResult{}, domain.NewError(422, "LISTING_INCOMPLETE", "缺少分类、开发者、简介、介绍、截图或功能亮点")
 	}
-	if input.Version.Chart == nil || input.Version.SourceRevision == "" || input.Version.LicenseID == "" || input.Version.LicenseURL == "" || !validEditorialURL(input.Version.LicenseURL) || (input.Version.SourceURL != "" && !validEditorialURL(input.Version.SourceURL)) {
-		return PublicationResult{}, domain.NewError(422, "VERSION_EVIDENCE_REQUIRED", "固定 OCI 包、源码 revision、许可证标识与 HTTPS 证据均为必填")
+	// VerdantFlare's own apps need no third-party license evidence; when a
+	// license is supplied it must still be complete.
+	licenseOptional := strings.TrimSpace(input.Developer) == selfDeveloper && input.Version.LicenseID == "" && input.Version.LicenseURL == ""
+	if input.Version.Chart == nil || input.Version.SourceRevision == "" || (input.Version.SourceURL != "" && !validEditorialURL(input.Version.SourceURL)) ||
+		(!licenseOptional && (input.Version.LicenseID == "" || !validEditorialURL(input.Version.LicenseURL))) {
+		return PublicationResult{}, domain.NewError(422, "VERSION_EVIDENCE_REQUIRED", "固定 OCI 包与源码 revision 为必填；第三方应用还须提供许可证标识与 HTTPS 证据")
 	}
 	if input.Version.Chart.PackageDigest == "" || input.Version.Chart.ManifestDigest == "" {
 		return PublicationResult{}, domain.NewError(422, "CHART_DIGEST_REQUIRED", "须提供已发行 OCI Chart 的双摘要")
