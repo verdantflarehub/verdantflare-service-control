@@ -261,12 +261,41 @@ func (s *Service) PatchManagedAppV2(ctx context.Context, subject, appID, ifMatch
 	if input.Showcase != nil {
 		updated.Showcase = *input.Showcase
 	}
-	if err := validateEditorialFields(updated); err != nil {
+	// Legacy records may predate the current showcase rules. A routine PATCH
+	// must validate only fields supplied in this request; first listing still
+	// checks the complete resulting record below.
+	editorialPatch := domain.App{}
+	if input.Summary != nil {
+		editorialPatch.Summary = updated.Summary
+	}
+	if input.Description != nil {
+		editorialPatch.Description = updated.Description
+	}
+	if input.PublicIconURL != nil {
+		editorialPatch.PublicIconURL = updated.PublicIconURL
+	}
+	if input.Showcase != nil {
+		editorialPatch.Showcase = updated.Showcase
+	}
+	if err := validateEditorialFields(editorialPatch); err != nil {
 		return domain.App{}, err
 	}
 	if current.App.Visibility != "listed" && updated.Visibility == "listed" {
+		if err := validateEditorialFields(updated); err != nil {
+			return domain.App{}, err
+		}
 		if readiness := publicationReadiness(updated); !readiness.Ready {
 			return domain.App{}, domain.NewError(422, "LISTING_INCOMPLETE", "上架资料不完整："+strings.Join(readiness.MissingFields, ", "))
+		}
+	} else if current.App.Visibility == "listed" && updated.Visibility == "listed" {
+		oldMissing := map[string]bool{}
+		for _, field := range publicationReadiness(current.App).MissingFields {
+			oldMissing[field] = true
+		}
+		for _, field := range publicationReadiness(updated).MissingFields {
+			if !oldMissing[field] {
+				return domain.App{}, domain.NewError(422, "LISTING_INCOMPLETE", "本次修改使已上架应用缺少必填资料："+field)
+			}
 		}
 	}
 
@@ -316,8 +345,13 @@ func (s *Service) selectAppReleaseV2(ctx context.Context, subject, appID, ifMatc
 	}
 	updated := current.App
 	if version != nil && strings.TrimSpace(*version) != "" {
-		if readiness := publicationReadiness(updated); !readiness.Ready {
-			return domain.App{}, domain.NewError(422, "LISTING_INCOMPLETE", "发布资料不完整："+strings.Join(readiness.MissingFields, ", "))
+		if updated.PublishedVersion == "" || updated.Visibility != "listed" {
+			if err := validateEditorialFields(updated); err != nil {
+				return domain.App{}, err
+			}
+			if readiness := publicationReadiness(updated); !readiness.Ready {
+				return domain.App{}, domain.NewError(422, "LISTING_INCOMPLETE", "发布资料不完整："+strings.Join(readiness.MissingFields, ", "))
+			}
 		}
 		targetVer := strings.TrimSpace(*version)
 		verRecord, err := s.repository.AppVersion(ctx, appID, targetVer)
@@ -339,7 +373,7 @@ func (s *Service) selectAppReleaseV2(ctx context.Context, subject, appID, ifMatc
 		updated.PublicVisible = true
 		// The publisher is self-bootstrapped from Hub before its MCP can run.
 		// Hub release selection must not make this admin tool installable by all Stations.
-		if releaseRequiresInstallGrant(appID, requireInstallGrant) {
+		if s.releaseRequiresInstallGrant(updated, requireInstallGrant) {
 			updated.InstallGrantRequired = true
 		}
 		if len(verRecord.Models) > 0 || updated.Models == nil {
@@ -372,8 +406,8 @@ func (s *Service) selectAppReleaseV2(ctx context.Context, subject, appID, ifMatc
 	return res.App, nil
 }
 
-func releaseRequiresInstallGrant(appID string, requested bool) bool {
-	return requested || appID == "app-publishing"
+func (s *Service) releaseRequiresInstallGrant(app domain.App, requested bool) bool {
+	return requested || app.InstallGrantRequired || s.requiredInstallGrantApps[app.ID]
 }
 
 func (s *Service) MarketAppsYAML(ctx context.Context, organizationID string, stationFeed bool) (domain.MarketAppsYaml, []byte, string, error) {

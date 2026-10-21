@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -76,6 +78,27 @@ func OpenPostgres(databaseURL string, maxOpen, maxIdle int, _ time.Time) (*Postg
 }
 
 func (p *Postgres) Close() error { return p.db.Close() }
+
+// ClaimPublicationNonce is atomic across Control replicas. Missing migrations
+// and database errors fail closed at the HTTP delegation boundary.
+func (p *Postgres) ClaimPublicationNonce(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	digest := sha256.Sum256([]byte(key))
+	var claimed string
+	err := p.db.QueryRowContext(ctx, `
+		INSERT INTO control_publication_nonces (digest, expires_at)
+		VALUES ($1, NOW() + ($2 * INTERVAL '1 second'))
+		ON CONFLICT (digest) DO UPDATE SET expires_at = EXCLUDED.expires_at
+		WHERE control_publication_nonces.expires_at <= NOW()
+		RETURNING digest`, hex.EncodeToString(digest[:]), ttl.Seconds()).Scan(&claimed)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("claim publication nonce: %w", err)
+	}
+	_, _ = p.db.ExecContext(ctx, `DELETE FROM control_publication_nonces WHERE expires_at < NOW() - INTERVAL '1 day'`)
+	return true, nil
+}
 
 func (p *Postgres) read(ctx context.Context) (*Memory, error) {
 	var raw []byte

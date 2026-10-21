@@ -8,6 +8,7 @@ import (
 )
 
 type Repository interface {
+	ClaimPublicationNonce(context.Context, string, time.Duration) (bool, error)
 	CenterContext(context.Context, string) (domain.CenterContext, error)
 	SetActiveOrganization(context.Context, string, string) (domain.CenterContext, error)
 	ActiveOrganization(context.Context, string) (domain.Organization, []string, string, error)

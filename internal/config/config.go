@@ -32,6 +32,7 @@ type Config struct {
 	ChartRegistryInternalURL    string
 	StudioPublishHMACKey        string
 	StudioPublishBindings       []StudioPublishBinding
+	RequiredInstallGrantApps    []string
 	StationOrganizationBindings []StationOrganizationBinding
 	ReadTimeout                 time.Duration
 	WriteTimeout                time.Duration
@@ -109,11 +110,15 @@ func Load() (Config, error) {
 	chartRegistryInternalURL := env("CONTROL_CHART_REGISTRY_INTERNAL_URL", "https://"+chartRegistryHost)
 	studioPublishHMACKey := strings.TrimSpace(os.Getenv("CONTROL_STUDIO_PUBLISH_HMAC_KEY"))
 	studioPublishBindings := strings.TrimSpace(os.Getenv("CONTROL_STUDIO_PUBLISH_BINDINGS"))
+	requiredInstallGrantApps := splitCSV(os.Getenv("CONTROL_INSTALL_GRANT_REQUIRED_APPS"))
 	if (studioPublishHMACKey == "") != (studioPublishBindings == "") {
 		return Config{}, fmt.Errorf("CONTROL_STUDIO_PUBLISH_HMAC_KEY and CONTROL_STUDIO_PUBLISH_BINDINGS must be set together")
 	}
 	if studioPublishHMACKey != "" && len(studioPublishHMACKey) < 32 {
 		return Config{}, fmt.Errorf("CONTROL_STUDIO_PUBLISH_HMAC_KEY must contain at least 32 characters")
+	}
+	if studioPublishHMACKey != "" && len(requiredInstallGrantApps) == 0 {
+		return Config{}, fmt.Errorf("CONTROL_INSTALL_GRANT_REQUIRED_APPS is required when Studio publishing is configured")
 	}
 	var publishBindings []StudioPublishBinding
 	if studioPublishBindings != "" {
@@ -166,6 +171,7 @@ func Load() (Config, error) {
 		ChartRegistryInternalURL:    chartRegistryInternalURL,
 		StudioPublishHMACKey:        studioPublishHMACKey,
 		StudioPublishBindings:       publishBindings,
+		RequiredInstallGrantApps:    requiredInstallGrantApps,
 		StationOrganizationBindings: stationBindings,
 		ReadTimeout:                 10 * time.Second,
 		WriteTimeout:                15 * time.Second,

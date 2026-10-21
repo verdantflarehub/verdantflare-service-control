@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/verdantflarehub/verdantflare-service-control/internal/config"
@@ -20,19 +19,18 @@ import (
 )
 
 const maxBodyBytes = 1 << 20
+const maxPublicationBodyBytes = 5 << 20
 
 type Server struct {
-	config         config.Config
-	service        *control.Service
-	logger         *slog.Logger
-	handler        http.Handler
-	publishNonceMu sync.Mutex
-	publishNonces  map[string]time.Time
+	config  config.Config
+	service *control.Service
+	logger  *slog.Logger
+	handler http.Handler
 }
 
 func New(config config.Config, service *control.Service, logger *slog.Logger) *Server {
 	service.SetChartRegistryDefaults(config.ChartRegistryHost, config.ChartRegistryInternalURL)
-	server := &Server{config: config, service: service, logger: logger, publishNonces: make(map[string]time.Time)}
+	server := &Server{config: config, service: service, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", server.health)
 	mux.HandleFunc("GET /readyz", server.health)
@@ -376,10 +374,19 @@ func (s *Server) subject(writer http.ResponseWriter, request *http.Request) (str
 }
 
 func (s *Server) decode(writer http.ResponseWriter, request *http.Request, target any) bool {
-	request.Body = http.MaxBytesReader(writer, request.Body, maxBodyBytes)
+	limit := int64(maxBodyBytes)
+	if request.URL.Path == "/api/control/internal/studio-publish/mcp" {
+		limit = maxPublicationBodyBytes
+	}
+	request.Body = http.MaxBytesReader(writer, request.Body, limit)
 	decoder := json.NewDecoder(request.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
+		var tooLarge *http.MaxBytesError
+		if request.URL.Path == "/api/control/internal/studio-publish/mcp" && errors.As(err, &tooLarge) {
+			s.writeError(writer, request, domain.NewError(413, "REQUEST_TOO_LARGE", "请求体超过允许大小"))
+			return false
+		}
 		s.writeError(writer, request, domain.NewError(400, "invalid_json", "请求体不是有效 JSON 或包含未知字段"))
 		return false
 	}

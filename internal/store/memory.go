@@ -13,8 +13,9 @@ import (
 )
 
 type Memory struct {
-	mu      sync.RWMutex
-	surveys map[string]domain.SurveyState
+	mu                sync.RWMutex
+	publicationNonces map[string]time.Time
+	surveys           map[string]domain.SurveyState
 
 	users         map[string]domain.CenterUser
 	organizations map[string]domain.Organization
@@ -33,6 +34,25 @@ type Memory struct {
 	billing       map[string]domain.BillingSummary
 	releases      []domain.Release
 	opsOrgs       []domain.OperationsOrganization
+}
+
+func (m *Memory) ClaimPublicationNonce(_ context.Context, key string, ttl time.Duration) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.publicationNonces == nil {
+		m.publicationNonces = make(map[string]time.Time)
+	}
+	now := time.Now()
+	for nonce, until := range m.publicationNonces {
+		if !until.After(now) {
+			delete(m.publicationNonces, nonce)
+		}
+	}
+	if _, exists := m.publicationNonces[key]; exists {
+		return false, nil
+	}
+	m.publicationNonces[key] = now.Add(ttl)
+	return true, nil
 }
 
 // NewMemoryBootstrap creates only the operational identity needed to provision

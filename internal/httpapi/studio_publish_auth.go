@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,9 +54,14 @@ func (s *Server) delegatedPublisher(w http.ResponseWriter, r *http.Request) (str
 		s.writeError(w, r, domain.NewError(403, "PUBLISHER_NOT_BOUND", "当前 Studio 身份未绑定发布者"))
 		return "", false
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPublicationBodyBytes))
 	if err != nil {
-		s.writeError(w, r, domain.NewError(400, "INVALID_REQUEST", "发布请求体过大"))
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			s.writeError(w, r, domain.NewError(413, "REQUEST_TOO_LARGE", "发布请求体超过 5 MiB"))
+		} else {
+			s.writeError(w, r, domain.NewError(400, "INVALID_REQUEST", "发布请求体读取失败"))
+		}
 		return "", false
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
@@ -68,20 +74,15 @@ func (s *Server) delegatedPublisher(w http.ResponseWriter, r *http.Request) (str
 		s.writeError(w, r, domain.NewError(401, "DELEGATION_INVALID", "发布委托无效"))
 		return "", false
 	}
-	s.publishNonceMu.Lock()
-	for value, expires := range s.publishNonces {
-		if time.Now().After(expires) {
-			delete(s.publishNonces, value)
-		}
+	claimed, err := s.service.ClaimPublicationNonce(r.Context(), userID+"/"+nonce, 70*time.Second)
+	if err != nil {
+		s.writeError(w, r, domain.NewError(503, "DELEGATION_STORE_UNAVAILABLE", "发布委托校验暂不可用"))
+		return "", false
 	}
-	key := userID + "/" + nonce
-	if _, repeated := s.publishNonces[key]; repeated {
-		s.publishNonceMu.Unlock()
+	if !claimed {
 		s.writeError(w, r, domain.NewError(409, "DELEGATION_REPLAY", "发布请求已处理，请回读结果"))
 		return "", false
 	}
-	s.publishNonces[key] = time.Now().Add(70 * time.Second)
-	s.publishNonceMu.Unlock()
 	if err := s.service.AssertDelegatedPublisher(r.Context(), bindingSubject, boundOrg); err != nil {
 		s.writeError(w, r, err)
 		return "", false

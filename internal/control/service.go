@@ -21,15 +21,16 @@ import (
 )
 
 type Service struct {
-	repository        store.Repository
-	modelGateway      ModelGateway
-	accountGateway    GatewayAccounts
-	loginDirectory    LoginDirectory
-	chartRegistryHost string
-	chartRegistryURL  string
-	chartHTTPClient   *http.Client
-	modelRunSlots     chan struct{}
-	now               func() time.Time
+	repository               store.Repository
+	modelGateway             ModelGateway
+	accountGateway           GatewayAccounts
+	loginDirectory           LoginDirectory
+	chartRegistryHost        string
+	chartRegistryURL         string
+	chartHTTPClient          *http.Client
+	requiredInstallGrantApps map[string]bool
+	modelRunSlots            chan struct{}
+	now                      func() time.Time
 }
 
 type ModelGateway interface {
@@ -81,6 +82,20 @@ func (s *Service) SetChartRegistryDefaults(host, baseURL string) {
 			s.chartRegistryURL = trimmed
 		}
 	}
+}
+
+func (s *Service) SetRequiredInstallGrantApps(appIDs []string) {
+	allowed := make(map[string]bool, len(appIDs))
+	for _, appID := range appIDs {
+		if id := strings.TrimSpace(appID); id != "" {
+			allowed[id] = true
+		}
+	}
+	s.requiredInstallGrantApps = allowed
+}
+
+func (s *Service) ClaimPublicationNonce(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	return s.repository.ClaimPublicationNonce(ctx, key, ttl)
 }
 
 var gatewayRequestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,80}$`)

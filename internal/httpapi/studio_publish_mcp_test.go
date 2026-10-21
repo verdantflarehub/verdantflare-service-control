@@ -87,6 +87,43 @@ func TestStudioPublicationDelegationRejectsUnsignedAndReplay(t *testing.T) {
 	}
 }
 
+func TestStudioPublicationBodyLimitMatchesRelay(t *testing.T) {
+	key := "test-only-key-with-at-least-thirty-two-characters"
+	cfg := testConfig()
+	cfg.StudioPublishHMACKey = key
+	cfg.StudioPublishBindings = []config.StudioPublishBinding{{StationUserID: "station-user", StationOrganizationID: "station-org", LoginSubject: "logto_01vf9k2", ControlOrganizationID: "org_verdantflare"}}
+	server := newTestServer(t, cfg)
+	path := "/api/control/internal/studio-publish/mcp"
+	for _, tc := range []struct{ size, want int }{{2 << 20, http.StatusOK}, {6 << 20, http.StatusRequestEntityTooLarge}} {
+		body := []byte(`{"jsonrpc":"2.0","id":"large-request","method":"tools/call","params":{"name":"app_publish.list","arguments":{"padding":"` + strings.Repeat("x", tc.size) + `"}}}`)
+		nonce := fmt.Sprintf("nonce-%032d", tc.size)
+		timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+		digest := sha256.Sum256(body)
+		message := fmt.Sprintf("POST\n%s\n%s\n%s\nstation-user\nstation-org\n%x", path, timestamp, nonce, digest)
+		mac := hmac.New(sha256.New, []byte(key))
+		_, _ = mac.Write([]byte(message))
+		req, err := http.NewRequest(http.MethodPost, server.URL+path, bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-App-Publish-User", "station-user")
+		req.Header.Set("X-App-Publish-Organization", "station-org")
+		req.Header.Set("X-App-Publish-Timestamp", timestamp)
+		req.Header.Set("X-App-Publish-Nonce", nonce)
+		req.Header.Set("X-App-Publish-Signature", hex.EncodeToString(mac.Sum(nil)))
+		response, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, response.Body)
+		response.Body.Close()
+		if response.StatusCode != tc.want {
+			t.Fatalf("%d-byte request status = %d, want %d", len(body), response.StatusCode, tc.want)
+		}
+	}
+}
+
 func signedPublicationCall(t *testing.T, server *httptest.Server, key, nonce, name string, arguments any) (bool, json.RawMessage) {
 	t.Helper()
 	path := "/api/control/internal/studio-publish/mcp"
