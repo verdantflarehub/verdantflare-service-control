@@ -73,12 +73,12 @@ func NewMemorySeeded(now time.Time) *Memory {
 	}
 
 	apps := []domain.App{
-		{ID: "comfyui-studio", Name: "ComfyUI Studio", Category: "视觉创作", Summary: "面向节点工作流的图像与视频生成环境。", Version: "1.4.2", Channel: "Stable", Status: "可用", Tone: "mint", Icon: "nodes", GPU: "L40S · 24 GB", Duration: "最长 60 分钟"},
-		{ID: "wan-video", Name: "Wan Video Studio", Category: "视频生成", Summary: "从文本、图片与参考动作生成可控视频。", Version: "0.9.8", Channel: "Preview", Status: "可体验", Tone: "blue", Icon: "video", GPU: "H100 · 40 GB", Duration: "最长 30 分钟"},
-		{ID: "f5-tts", Name: "F5-TTS Studio", Category: "声音与配音", Summary: "面向配音、音色实验和批量语音合成。", Version: "0.7.4", Channel: "Preview", Status: "申请体验", Tone: "amber", Icon: "wave", GPU: "L40S · 16 GB", Duration: "最长 45 分钟"},
-		{ID: "open-cut", Name: "OpenCut Web", Category: "视频剪辑", Summary: "轻量浏览器剪辑、字幕与素材编排工作台。", Version: "0.9.4", Channel: "Preview", Status: "可用", Tone: "coral", Icon: "cut", GPU: "CPU · 8 Core", Duration: "最长 90 分钟"},
-		{ID: "open-webui", Name: "Open WebUI", Category: "AI 助手", Summary: "连接私有模型、知识库与团队提示词。", Version: "1.0.16", Channel: "Stable", Status: "可用", Tone: "violet", Icon: "chat", GPU: "CPU · 4 Core", Duration: "最长 120 分钟"},
-		{ID: "face-lip", Name: "Face & Lip Workflow", Category: "数字人", Summary: "口型同步、人物一致性与镜头批处理。", Version: "1.3.0", Channel: "Stable", Status: "可用", Tone: "mint", Icon: "face", GPU: "L40S · 24 GB", Duration: "最长 45 分钟"},
+		{ID: "comfyui-studio", Name: "ComfyUI Studio", Category: "视觉创作", Summary: "面向节点工作流的图像与视频生成环境。", Version: "1.4.2", Channel: "Stable", Enabled: true, Status: "可用", Tone: "mint", Icon: "nodes", GPU: "L40S · 24 GB", Duration: "最长 60 分钟"},
+		{ID: "wan-video", Name: "Wan Video Studio", Category: "视频生成", Summary: "从文本、图片与参考动作生成可控视频。", Version: "0.9.8", Channel: "Preview", Enabled: true, Status: "可体验", Tone: "blue", Icon: "video", GPU: "H100 · 40 GB", Duration: "最长 30 分钟"},
+		{ID: "f5-tts", Name: "F5-TTS Studio", Category: "声音与配音", Summary: "面向配音、音色实验和批量语音合成。", Version: "0.7.4", Channel: "Preview", Enabled: true, Status: "申请体验", Tone: "amber", Icon: "wave", GPU: "L40S · 16 GB", Duration: "最长 45 分钟"},
+		{ID: "open-cut", Name: "OpenCut Web", Category: "视频剪辑", Summary: "轻量浏览器剪辑、字幕与素材编排工作台。", Version: "0.9.4", Channel: "Preview", Enabled: true, Status: "可用", Tone: "coral", Icon: "cut", GPU: "CPU · 8 Core", Duration: "最长 90 分钟"},
+		{ID: "open-webui", Name: "Open WebUI", Category: "AI 助手", Summary: "连接私有模型、知识库与团队提示词。", Version: "1.0.16", Channel: "Stable", Enabled: true, Status: "可用", Tone: "violet", Icon: "chat", GPU: "CPU · 4 Core", Duration: "最长 120 分钟"},
+		{ID: "face-lip", Name: "Face & Lip Workflow", Category: "数字人", Summary: "口型同步、人物一致性与镜头批处理。", Version: "1.3.0", Channel: "Stable", Enabled: true, Status: "可用", Tone: "mint", Icon: "face", GPU: "L40S · 24 GB", Duration: "最长 45 分钟"},
 	}
 	appMap := make(map[string]domain.App, len(apps))
 	allEntitlements := make(map[string]bool, len(apps))
@@ -498,7 +498,7 @@ func (m *Memory) ListOperationsOrganizations(_ context.Context) ([]domain.Operat
 	for id, organization := range m.organizations {
 		appCount := 0
 		for appID, enabled := range m.entitlements[id] {
-			if enabled && published(m.apps[appID]) {
+			if enabled && entitlementSelectable(m.apps[appID]) {
 				appCount++
 			}
 		}

@@ -28,6 +28,11 @@ func published(app domain.App) bool {
 	return app.Channel == "Preview" || app.Channel == "Stable"
 }
 
+// Paused apps retain historical grants, but are not new grant options.
+func entitlementSelectable(app domain.App) bool {
+	return published(app) && app.Enabled && app.DisabledReason == ""
+}
+
 func normalizeApp(app domain.App) domain.App {
 	if app.ID == "" {
 		app.ID = app.AppID
@@ -256,7 +261,7 @@ func (m *Memory) managedOrganizationLocked(id string) (domain.ManagedOrganizatio
 	}
 	result := domain.ManagedOrganization{Organization: organization, Apps: []domain.App{}, AppIDs: []string{}, Members: m.membersForLocked(id)}
 	for _, app := range m.apps {
-		if !published(app) {
+		if !entitlementSelectable(app) {
 			continue
 		}
 		result.Apps = append(result.Apps, app)
@@ -300,17 +305,17 @@ func (m *Memory) UpdateManagedOrganization(_ context.Context, id string, update 
 		return domain.ManagedOrganization{}, domain.NewError(409, "entitlement_version_conflict", "权益已被其他管理员修改，请刷新后重试")
 	}
 	entitlements := make(map[string]bool, len(appIDs))
-	// The editor only lists published apps. Keep grants for temporarily paused
+	// The editor only lists distributable apps. Keep grants for paused
 	// apps so changing the plan does not silently revoke them.
 	for appID, enabled := range m.entitlements[id] {
-		if app, exists := m.apps[appID]; exists && enabled && !published(app) {
+		if app, exists := m.apps[appID]; exists && enabled && !entitlementSelectable(app) {
 			entitlements[appID] = true
 		}
 	}
 	for _, appID := range appIDs {
 		app, ok := m.apps[appID]
-		if !ok || !published(app) {
-			return domain.ManagedOrganization{}, domain.NewError(400, "app_unpublished", "只能授权已发布的应用")
+		if !ok || !entitlementSelectable(app) {
+			return domain.ManagedOrganization{}, domain.NewError(400, "app_unpublished", "只能授权正在分发的应用")
 		}
 		entitlements[appID] = true
 	}

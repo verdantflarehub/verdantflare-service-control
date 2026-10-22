@@ -134,7 +134,7 @@ func TestManagedAppPublicationAndEntitlement(t *testing.T) {
 		t.Fatal("unentitled app appeared in customer Market")
 	}
 	public := request(t, server, http.MethodPatch, "/api/control/ops/apps/"+appID, map[string]any{
-		"name": "Workflow Demo", "version": "0.1.0", "category": "视觉创作", "summary": "测试应用", "channel": "Preview", "publicVisible": true,
+		"name": "Workflow Demo", "version": "0.1.0", "category": "视觉创作", "summary": "测试应用", "channel": "Preview", "publicVisible": true, "enabled": true,
 	})
 	if public.StatusCode != http.StatusOK {
 		t.Fatalf("public publish status = %d, body = %s", public.StatusCode, readBody(t, public))
