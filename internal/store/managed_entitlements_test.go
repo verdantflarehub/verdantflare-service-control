@@ -39,3 +39,38 @@ func TestDisabledPublishedAppIsNotAnEntitlementOption(t *testing.T) {
 		t.Fatal("editing other entitlements silently revoked historical grant")
 	}
 }
+
+func TestRetiredPublishedAppLeavesActiveReleaseListButKeepsHistory(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemorySeeded(time.Now().UTC())
+	const appID = "app-publishing"
+	m.apps[appID] = domain.App{ID: appID, Name: "应用发布", Channel: "Stable", Visibility: "hidden", Enabled: false, DisabledReason: "已由 Hub MCP 替代", PublishedVersion: "0.1.0"}
+
+	releases, err := m.ListReleases(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, release := range releases {
+		if release.AppID == appID {
+			t.Fatal("retired app remains in active releases")
+		}
+	}
+	managed, err := m.ManagedApp(ctx, appID)
+	if err != nil || managed.App.PublishedVersion != "0.1.0" {
+		t.Fatalf("retired version cannot be audited: %+v, %v", managed, err)
+	}
+	if managed.Release.Status != "已停用" {
+		t.Fatalf("retired app shows misleading release status: %s", managed.Release.Status)
+	}
+
+	app := m.apps[appID]
+	app.Visibility = "listed"
+	m.apps[appID] = app
+	releases, err = m.ListReleases(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(releases, func(release domain.Release) bool { return release.AppID == appID }) {
+		t.Fatal("ordinary disabled app was hidden from operations")
+	}
+}

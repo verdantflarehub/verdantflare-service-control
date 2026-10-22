@@ -477,6 +477,11 @@ func (m *Memory) ListReleases(_ context.Context) ([]domain.Release, error) {
 	defer m.mu.RUnlock()
 	result := make([]domain.Release, 0, len(m.apps))
 	for _, app := range m.apps {
+		// A hidden, disabled published app is retired from the active operations
+		// list. Keep its AppVersion and direct managed-app read for audit.
+		if app.Visibility == "hidden" && !app.Enabled && app.PublishedVersion != "" {
+			continue
+		}
 		if app.Visibility == "hidden" && (app.GroupID == "agent" || strings.Contains(app.DisabledReason, "未纳入 Station 应用目录")) {
 			continue
 		}
