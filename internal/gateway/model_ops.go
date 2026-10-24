@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,9 +18,46 @@ import (
 type ModelOpsSnapshot struct {
 	ModelID  string            `json:"modelId"`
 	Revision string            `json:"revision"`
+	Sequence uint64            `json:"sequence"`
 	Channels []ModelOpsChannel `json:"channels"`
 	Pricing  ModelOpsPricing   `json:"pricing"`
 	Metadata ModelOpsMetadata  `json:"metadata"`
+}
+
+// ModelOpsBillingInput is a model-scoped rule. No supplier credential or
+// arbitrary new-api option key can be sent through this client.
+type ModelOpsBillingInput struct {
+	ModelID                 string   `json:"modelId"`
+	RequestID               string   `json:"requestId,omitempty"`
+	ExpectedGatewayRevision string   `json:"expectedGatewayRevision,omitempty"`
+	Mode                    string   `json:"mode"`
+	BillingExpr             string   `json:"billingExpr,omitempty"`
+	PriceUSD                *float64 `json:"priceUsd,omitempty"`
+}
+
+type ModelOpsAliasInput struct {
+	ModelID                 string `json:"modelId"`
+	SourceModelID           string `json:"sourceModelId"`
+	SourceChannelID         int    `json:"sourceChannelId"`
+	RequestID               string `json:"requestId"`
+	ExpectedGatewayRevision string `json:"expectedGatewayRevision"`
+}
+
+type ModelOpsWriteResult struct {
+	ModelID  string            `json:"modelId"`
+	Revision string            `json:"revision"`
+	Pricing  ModelOpsPricing   `json:"pricing,omitempty"`
+	Channels []ModelOpsChannel `json:"channels,omitempty"`
+	Replayed bool              `json:"replayed"`
+}
+
+type ModelOpsBillingPreview struct {
+	ModelID              string   `json:"modelId"`
+	CurrentRevision      string   `json:"currentRevision"`
+	Mode                 string   `json:"mode"`
+	PriceUSD             *float64 `json:"priceUsd,omitempty"`
+	Validated            bool     `json:"validated"`
+	ActualChargeVerified bool     `json:"actualChargeVerified"`
 }
 
 // Explicit response types are an allowlist: if the gateway later adds a
@@ -100,4 +138,60 @@ func (c *ModelOpsClient) Snapshot(ctx context.Context, modelID string) (ModelOps
 		return ModelOpsSnapshot{}, errors.New("invalid model operations gateway response")
 	}
 	return envelope.Data, nil
+}
+
+func (c *ModelOpsClient) post(ctx context.Context, path string, input, output any) error {
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(encoded))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := c.client.Do(request)
+	if err != nil {
+		return fmt.Errorf("model operations gateway unavailable: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return CenterHTTPError{Status: response.StatusCode}
+	}
+	var envelope struct {
+		Success bool            `json:"success"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&envelope); err != nil || !envelope.Success || len(envelope.Data) == 0 {
+		return errors.New("invalid model operations gateway response")
+	}
+	return json.Unmarshal(envelope.Data, output)
+}
+
+func (c *ModelOpsClient) BillingPreview(ctx context.Context, input ModelOpsBillingInput) (ModelOpsBillingPreview, error) {
+	var result ModelOpsBillingPreview
+	err := c.post(ctx, "/billing/preview", input, &result)
+	if err == nil && (result.ModelID != input.ModelID || !result.Validated || result.ActualChargeVerified) {
+		err = errors.New("invalid model billing preview")
+	}
+	return result, err
+}
+
+func (c *ModelOpsClient) BillingApply(ctx context.Context, input ModelOpsBillingInput) (ModelOpsWriteResult, error) {
+	var result ModelOpsWriteResult
+	err := c.post(ctx, "/billing/apply", input, &result)
+	if err == nil && (result.ModelID != input.ModelID || len(result.Revision) != 64 || result.Pricing.BillingMode == "") {
+		err = errors.New("invalid model billing readback")
+	}
+	return result, err
+}
+
+func (c *ModelOpsClient) AttachAlias(ctx context.Context, input ModelOpsAliasInput) (ModelOpsWriteResult, error) {
+	var result ModelOpsWriteResult
+	err := c.post(ctx, "/channel/attach-alias", input, &result)
+	if err == nil && (result.ModelID != input.ModelID || len(result.Revision) != 64 || len(result.Channels) == 0) {
+		err = errors.New("invalid model channel readback")
+	}
+	return result, err
 }

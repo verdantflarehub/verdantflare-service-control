@@ -53,6 +53,9 @@ type GatewayAccounts interface {
 
 type ModelOpsGateway interface {
 	Snapshot(context.Context, string) (gateway.ModelOpsSnapshot, error)
+	BillingPreview(context.Context, gateway.ModelOpsBillingInput) (gateway.ModelOpsBillingPreview, error)
+	BillingApply(context.Context, gateway.ModelOpsBillingInput) (gateway.ModelOpsWriteResult, error)
+	AttachAlias(context.Context, gateway.ModelOpsAliasInput) (gateway.ModelOpsWriteResult, error)
 }
 
 func (s *Service) SetModelOpsGateway(client ModelOpsGateway) { s.modelOpsGateway = client }

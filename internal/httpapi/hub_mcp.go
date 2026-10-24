@@ -9,6 +9,7 @@ import (
 
 	"github.com/verdantflarehub/verdantflare-service-control/internal/control"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
+	"github.com/verdantflarehub/verdantflare-service-control/internal/gateway"
 )
 
 type hubMCPRequest struct {
@@ -159,6 +160,12 @@ func (s *Server) callHubMCPTool(r *http.Request, subject, purpose, name string, 
 				return nil, err
 			}
 			return s.service.GatewayModelSnapshot(r.Context(), subject, input.ModelID)
+		case "model_publish.billing.preview":
+			var input gateway.ModelOpsBillingInput
+			if err := json.Unmarshal(arguments, &input); err != nil {
+				return nil, err
+			}
+			return s.service.GatewayBillingPreview(r.Context(), subject, input)
 		case "model_publish.get":
 			var input struct {
 				ModelID string `json:"modelId"`
@@ -254,6 +261,7 @@ func hubMCPTools(purpose string) []hubMCPTool {
 			{Name: "model_publish.get", Description: "只读获取单个模型的 Control 目录资料；不包含供应商密钥。", InputSchema: object(map[string]any{"modelId": stringField}, "modelId")},
 			{Name: "model_publish.gateway_models", Description: "只读列出 Control 专用 Token 当前在网关可见的模型 ID；不能代替渠道健康或计费检查。", InputSchema: object(map[string]any{})},
 			{Name: "model_publish.gateway_snapshot", Description: "只读回读 new-api 中单个模型的脱敏渠道、计费和修订；未配置独立模型运营服务身份时不可用。", InputSchema: object(map[string]any{"modelId": stringField}, "modelId")},
+			{Name: "model_publish.billing.preview", Description: "只读验证单模型计费规则，不保存配置，也不证明真实调用已扣费。mode 为 tiered_expr 或 per_request；分别提供 billingExpr 或 priceUsd（美元）。", InputSchema: object(map[string]any{"modelId": stringField, "mode": stringField, "billingExpr": stringField, "priceUsd": map[string]any{"type": "number"}}, "modelId", "mode")},
 		}
 	}
 	if purpose != control.MCPTokenPurposeApp {

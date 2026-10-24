@@ -141,6 +141,7 @@ type AppShowcase struct {
 // gateway entitlement, routing, metering or billing record.
 type PublicModel struct {
 	ID              string   `json:"id"`
+	Revision        int      `json:"revision"`
 	Name            string   `json:"name"`
 	Provider        string   `json:"provider"`
 	ProviderIconURL string   `json:"providerIconUrl,omitempty"`

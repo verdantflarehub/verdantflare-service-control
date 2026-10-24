@@ -48,3 +48,35 @@ func TestModelOpsClientRejectsInvalidOriginAndCredential(t *testing.T) {
 		t.Fatal("accepted short service token")
 	}
 }
+
+func TestModelOpsClientScopedWriteReadbackDoesNotForwardUnknownFields(t *testing.T) {
+	const modelID = "internal-deepseek-test"
+	const serviceToken = "model-ops-service-token-at-least-thirty-two-characters"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer "+serviceToken {
+			t.Errorf("unexpected write method or auth")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path != "/api/internal/center/model-ops/billing/apply" {
+			t.Errorf("unexpected write path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true,"data":{"modelId":"internal-deepseek-test","revision":"` + strings.Repeat("b", 64) + `","pricing":{"billingMode":"ratio","modelPrice":0.02,"supplierKey":"never-forward"},"replayed":false,"supplierKey":"never-forward"}}`))
+	}))
+	defer server.Close()
+	client, err := NewModelOpsClient(server.URL, serviceToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	price := 0.02
+	result, err := client.BillingApply(context.Background(), ModelOpsBillingInput{ModelID: modelID, Mode: "per_request", PriceUSD: &price})
+	if err != nil || result.ModelID != modelID || result.Pricing.ModelPrice == nil || *result.Pricing.ModelPrice != price {
+		t.Fatalf("write result = %+v, err = %v", result, err)
+	}
+	forwarded, err := json.Marshal(result)
+	if err != nil || strings.Contains(string(forwarded), "never-forward") || strings.Contains(string(forwarded), "supplierKey") {
+		t.Fatalf("write readback forwarded unknown data: %s, %v", forwarded, err)
+	}
+}

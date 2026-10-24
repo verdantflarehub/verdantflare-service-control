@@ -55,6 +55,7 @@ func (m *Memory) CreateManagedModel(_ context.Context, model domain.PublicModel)
 		return domain.PublicModel{}, domain.NewError(409, "model_exists", "模型 ID 已存在")
 	}
 	model.PublicVisible = false
+	model.Revision = 1
 	m.publicModels[model.ID] = model
 	return model, nil
 }
@@ -62,10 +63,28 @@ func (m *Memory) CreateManagedModel(_ context.Context, model domain.PublicModel)
 func (m *Memory) UpdateManagedModel(_ context.Context, id string, model domain.PublicModel) (domain.PublicModel, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, exists := m.publicModels[id]; !exists {
+	current, exists := m.publicModels[id]
+	if !exists {
 		return domain.PublicModel{}, domain.NewError(404, "model_not_found", "模型不存在")
 	}
 	model.ID = id
+	model.Revision = current.Revision + 1
+	m.publicModels[id] = model
+	return model, nil
+}
+
+func (m *Memory) UpdateManagedModelCAS(_ context.Context, id string, expectedRevision int, model domain.PublicModel) (domain.PublicModel, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, exists := m.publicModels[id]
+	if !exists {
+		return domain.PublicModel{}, domain.NewError(404, "model_not_found", "模型不存在")
+	}
+	if current.Revision != expectedRevision {
+		return domain.PublicModel{}, domain.NewError(409, "model_revision_changed", "模型目录资料已变化，请重新回读")
+	}
+	model.ID = id
+	model.Revision = current.Revision + 1
 	m.publicModels[id] = model
 	return model, nil
 }
@@ -93,5 +112,14 @@ func (p *Postgres) CreateManagedModel(ctx context.Context, model domain.PublicMo
 
 func (p *Postgres) UpdateManagedModel(ctx context.Context, id string, model domain.PublicModel) (result domain.PublicModel, err error) {
 	err = p.mutate(ctx, func(m *Memory) error { var e error; result, e = m.UpdateManagedModel(ctx, id, model); return e })
+	return
+}
+
+func (p *Postgres) UpdateManagedModelCAS(ctx context.Context, id string, expectedRevision int, model domain.PublicModel) (result domain.PublicModel, err error) {
+	err = p.mutate(ctx, func(m *Memory) error {
+		var e error
+		result, e = m.UpdateManagedModelCAS(ctx, id, expectedRevision, model)
+		return e
+	})
 	return
 }
