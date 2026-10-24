@@ -162,7 +162,7 @@ func TestHubMCPModelTokenCannotUseAppTools(t *testing.T) {
 	if err := json.NewDecoder(listed.Body).Decode(&catalog); err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Result.Tools) != 5 {
+	if len(catalog.Result.Tools) != 6 {
 		t.Fatalf("model tools = %+v", catalog.Result.Tools)
 	}
 	for _, tool := range catalog.Result.Tools {
@@ -181,6 +181,9 @@ func TestHubMCPModelTokenCannotUseAppTools(t *testing.T) {
 	}
 	if failed, result := hubMCPCall(t, server, modelToken.Secret, "model_publish.billing.preview", map[string]any{"modelId": "test-model", "mode": "per_request", "priceUsd": 0.02}); !failed || !strings.Contains(string(result), "MODEL_CONFIG_UNAVAILABLE") {
 		t.Fatalf("unconfigured billing preview = %t %s", failed, result)
+	}
+	if failed, result := hubMCPCall(t, server, modelToken.Secret, "model_publish.validate", map[string]any{"modelId": "test-model"}); !failed || !strings.Contains(string(result), "MODEL_CONFIG_UNAVAILABLE") {
+		t.Fatalf("unconfigured publication validation = %t %s", failed, result)
 	}
 	if failed, result := hubMCPCall(t, server, appToken, "model_publish.list", map[string]any{}); !failed || !strings.Contains(string(result), "MCP_TOOL_FORBIDDEN") {
 		t.Fatalf("app token model call = %t %s", failed, result)

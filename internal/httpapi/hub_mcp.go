@@ -166,6 +166,14 @@ func (s *Server) callHubMCPTool(r *http.Request, subject, purpose, name string, 
 				return nil, err
 			}
 			return s.service.GatewayBillingPreview(r.Context(), subject, input)
+		case "model_publish.validate":
+			var input struct {
+				ModelID string `json:"modelId"`
+			}
+			if err := json.Unmarshal(arguments, &input); err != nil {
+				return nil, err
+			}
+			return s.service.ValidateModelPublication(r.Context(), subject, input.ModelID)
 		case "model_publish.get":
 			var input struct {
 				ModelID string `json:"modelId"`
@@ -262,6 +270,7 @@ func hubMCPTools(purpose string) []hubMCPTool {
 			{Name: "model_publish.gateway_models", Description: "只读列出 Control 专用 Token 当前在网关可见的模型 ID；不能代替渠道健康或计费检查。", InputSchema: object(map[string]any{})},
 			{Name: "model_publish.gateway_snapshot", Description: "只读回读 new-api 中单个模型的脱敏渠道、计费和修订；未配置独立模型运营服务身份时不可用。", InputSchema: object(map[string]any{"modelId": stringField}, "modelId")},
 			{Name: "model_publish.billing.preview", Description: "只读验证单模型计费规则，不保存配置，也不证明真实调用已扣费。mode 为 tiered_expr 或 per_request；分别提供 billingExpr 或 priceUsd（美元）。", InputSchema: object(map[string]any{"modelId": stringField, "mode": stringField, "billingExpr": stringField, "priceUsd": map[string]any{"type": "number"}}, "modelId", "mode")},
+			{Name: "model_publish.validate", Description: "只读预检目录、默认组渠道、元数据、计费和专用 Token 可见性；真实付费探针尚未接入，ready 始终为 false，不能据此上架。", InputSchema: object(map[string]any{"modelId": stringField}, "modelId")},
 		}
 	}
 	if purpose != control.MCPTokenPurposeApp {
