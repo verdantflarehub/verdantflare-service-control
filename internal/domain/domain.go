@@ -286,6 +286,7 @@ type APIKey struct {
 type MCPToken struct {
 	ID           string     `json:"id"`
 	LoginSubject string     `json:"-"`
+	Purpose      string     `json:"purpose,omitempty"`
 	Name         string     `json:"name"`
 	Prefix       string     `json:"prefix"`
 	CreatedAt    time.Time  `json:"createdAt"`

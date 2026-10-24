@@ -130,6 +130,107 @@ func TestHubMCPRequiresValidToken(t *testing.T) {
 	}
 }
 
+func TestHubMCPModelTokenCannotUseAppTools(t *testing.T) {
+	server := newTestServer(t, testConfig())
+	_, appToken := issueMCPToken(t, server)
+	response := request(t, server, http.MethodPost, "/api/control/settings/mcp-tokens", map[string]any{
+		"name": "模型上架工具", "expiresInDays": 30, "purpose": "model_publish",
+	})
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("model token status = %d", response.StatusCode)
+	}
+	var modelToken struct {
+		Secret  string `json:"secret"`
+		Purpose string `json:"purpose"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&modelToken); err != nil {
+		t.Fatal(err)
+	}
+	if modelToken.Purpose != "model_publish" || modelToken.Secret == "" {
+		t.Fatalf("unexpected model token metadata: %+v", modelToken)
+	}
+	listed := hubMCPPost(t, server, modelToken.Secret, []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	defer listed.Body.Close()
+	var catalog struct {
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(listed.Body).Decode(&catalog); err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Result.Tools) != 4 {
+		t.Fatalf("model tools = %+v", catalog.Result.Tools)
+	}
+	for _, tool := range catalog.Result.Tools {
+		if !strings.HasPrefix(tool.Name, "model_publish.") {
+			t.Fatalf("model token discovered foreign tool %q", tool.Name)
+		}
+	}
+	if failed, result := hubMCPCall(t, server, modelToken.Secret, "model_publish.list", map[string]any{}); failed || len(result) == 0 {
+		t.Fatalf("model list = %t %s", failed, result)
+	}
+	if failed, result := hubMCPCall(t, server, modelToken.Secret, "model_publish.get", map[string]any{"modelId": "missing"}); !failed || !strings.Contains(string(result), "MODEL_NOT_FOUND") {
+		t.Fatalf("missing model = %t %s", failed, result)
+	}
+	if failed, result := hubMCPCall(t, server, modelToken.Secret, "model_publish.gateway_snapshot", map[string]any{"modelId": "test-model"}); !failed || !strings.Contains(string(result), "model_gateway_ops_unavailable") {
+		t.Fatalf("unconfigured gateway snapshot = %t %s", failed, result)
+	}
+	if failed, result := hubMCPCall(t, server, appToken, "model_publish.list", map[string]any{}); !failed || !strings.Contains(string(result), "MCP_TOOL_FORBIDDEN") {
+		t.Fatalf("app token model call = %t %s", failed, result)
+	}
+	failed, result := hubMCPCall(t, server, modelToken.Secret, "app_publish.list", map[string]any{})
+	if !failed || !strings.Contains(string(result), "MCP_TOOL_FORBIDDEN") {
+		t.Fatalf("model token app call = %t %s", failed, result)
+	}
+	appTokens := request(t, server, http.MethodGet, "/api/control/settings/mcp-tokens", nil)
+	defer appTokens.Body.Close()
+	var appList []struct {
+		Purpose string `json:"purpose"`
+	}
+	if err := json.NewDecoder(appTokens.Body).Decode(&appList); err != nil {
+		t.Fatal(err)
+	}
+	if len(appList) != 1 || appList[0].Purpose != "app_publish" {
+		t.Fatalf("app token list = %+v", appList)
+	}
+	modelTokens := request(t, server, http.MethodGet, "/api/control/settings/mcp-tokens?purpose=model_publish", nil)
+	defer modelTokens.Body.Close()
+	var modelList []struct {
+		Purpose string `json:"purpose"`
+	}
+	if err := json.NewDecoder(modelTokens.Body).Decode(&modelList); err != nil {
+		t.Fatal(err)
+	}
+	if len(modelList) != 1 || modelList[0].Purpose != "model_publish" {
+		t.Fatalf("model token list = %+v", modelList)
+	}
+	invalidPurpose := request(t, server, http.MethodPost, "/api/control/settings/mcp-tokens", map[string]any{
+		"name": "invalid purpose", "purpose": "unknown",
+	})
+	invalidPurpose.Body.Close()
+	if invalidPurpose.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid purpose status = %d", invalidPurpose.StatusCode)
+	}
+	switched := request(t, server, http.MethodPut, "/api/control/context/active-organization", map[string]any{"organizationId": "org_northshore"})
+	switched.Body.Close()
+	forbidden := hubMCPPost(t, server, modelToken.Secret, []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	forbidden.Body.Close()
+	if forbidden.StatusCode != http.StatusForbidden {
+		t.Fatalf("model token without api_ops_admin status = %d", forbidden.StatusCode)
+	}
+	createForbidden := request(t, server, http.MethodPost, "/api/control/settings/mcp-tokens", map[string]any{
+		"name": "forbidden model token", "purpose": "model_publish",
+	})
+	createForbidden.Body.Close()
+	if createForbidden.StatusCode != http.StatusForbidden {
+		t.Fatalf("model token create without api_ops_admin status = %d", createForbidden.StatusCode)
+	}
+}
+
 func TestHubMCPBodyLimit(t *testing.T) {
 	server := newTestServer(t, testConfig())
 	_, token := issueMCPToken(t, server)

@@ -79,6 +79,14 @@ func main() {
 		}
 		service.SetGatewayAccounts(accountGateway)
 	}
+	if configuration.GatewayModelOpsToken != "" {
+		modelOpsGateway, err := gateway.NewModelOpsClient(configuration.GatewayBaseURL, configuration.GatewayModelOpsToken)
+		if err != nil {
+			logger.Error("invalid model operations gateway configuration", "error", err)
+			os.Exit(1)
+		}
+		service.SetModelOpsGateway(modelOpsGateway)
+	}
 	sweepContext, stopSweep := context.WithCancel(context.Background())
 	defer stopSweep()
 	go func() {

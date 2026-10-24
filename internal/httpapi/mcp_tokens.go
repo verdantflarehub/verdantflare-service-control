@@ -11,7 +11,7 @@ func (s *Server) listMCPTokens(writer http.ResponseWriter, request *http.Request
 	if !ok {
 		return
 	}
-	result, err := s.service.ListMCPTokens(request.Context(), subject)
+	result, err := s.service.ListMCPTokens(request.Context(), subject, request.URL.Query().Get("purpose"))
 	s.respond(writer, request, result, err, http.StatusOK)
 }
 

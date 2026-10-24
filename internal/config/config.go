@@ -18,6 +18,7 @@ type Config struct {
 	GatewayBaseURL              string
 	GatewayToken                string
 	GatewayAdminToken           string
+	GatewayModelOpsToken        string
 	LoginDirectoryBaseURL       string
 	LoginDirectoryToken         string
 	DevLoginSubject             string
@@ -63,6 +64,7 @@ func Load() (Config, error) {
 	gatewayBaseURL := strings.TrimSpace(os.Getenv("CONTROL_GATEWAY_BASE_URL"))
 	gatewayToken := strings.TrimSpace(os.Getenv("CONTROL_GATEWAY_TOKEN"))
 	gatewayAdminToken := strings.TrimSpace(os.Getenv("CONTROL_GATEWAY_ADMIN_TOKEN"))
+	gatewayModelOpsToken := strings.TrimSpace(os.Getenv("CONTROL_GATEWAY_MODEL_OPS_TOKEN"))
 	loginDirectoryBaseURL := strings.TrimSpace(os.Getenv("CONTROL_LOGIN_DIRECTORY_BASE_URL"))
 	loginDirectoryToken := strings.TrimSpace(os.Getenv("CONTROL_LOGIN_DIRECTORY_TOKEN"))
 	if (loginDirectoryBaseURL == "") != (loginDirectoryToken == "") {
@@ -79,6 +81,9 @@ func Load() (Config, error) {
 	}
 	if gatewayAdminToken != "" && (gatewayBaseURL == "" || len(gatewayAdminToken) < 32) {
 		return Config{}, fmt.Errorf("CONTROL_GATEWAY_ADMIN_TOKEN requires a gateway URL and at least 32 characters")
+	}
+	if gatewayModelOpsToken != "" && (gatewayBaseURL == "" || len(gatewayModelOpsToken) < 32 || gatewayModelOpsToken == gatewayAdminToken || gatewayModelOpsToken == gatewayToken) {
+		return Config{}, fmt.Errorf("CONTROL_GATEWAY_MODEL_OPS_TOKEN requires a gateway URL, at least 32 characters and a distinct gateway credential")
 	}
 	stationAddress := strings.TrimSpace(os.Getenv("CONTROL_STATION_MTLS_ADDRESS"))
 	stationCAFile := strings.TrimSpace(os.Getenv("CONTROL_STATION_MTLS_CA_FILE"))
@@ -123,6 +128,7 @@ func Load() (Config, error) {
 		GatewayBaseURL:              gatewayBaseURL,
 		GatewayToken:                gatewayToken,
 		GatewayAdminToken:           gatewayAdminToken,
+		GatewayModelOpsToken:        gatewayModelOpsToken,
 		LoginDirectoryBaseURL:       loginDirectoryBaseURL,
 		LoginDirectoryToken:         loginDirectoryToken,
 		DevLoginSubject:             devSubject,

@@ -13,10 +13,29 @@ import (
 )
 
 const mcpTokenPrefix = "vfhub_"
+const MCPTokenPurposeApp = "app_publish"
+const MCPTokenPurposeModel = "model_publish"
 
 type CreateMCPTokenInput struct {
 	Name          string `json:"name"`
 	ExpiresInDays int    `json:"expiresInDays,omitempty"`
+	Purpose       string `json:"purpose,omitempty"`
+}
+
+type MCPIdentity struct {
+	Subject string
+	Purpose string
+	TokenID string
+}
+
+func mcpTokenPurpose(value string) (string, string, error) {
+	if value == "" || value == MCPTokenPurposeApp {
+		return MCPTokenPurposeApp, "app_ops_admin", nil
+	}
+	if value == MCPTokenPurposeModel {
+		return MCPTokenPurposeModel, "api_ops_admin", nil
+	}
+	return "", "", domain.NewError(400, "mcp_token_purpose_invalid", "不支持的 MCP 令牌用途")
 }
 
 type CreateMCPTokenResult struct {
@@ -26,15 +45,35 @@ type CreateMCPTokenResult struct {
 
 // MCP tokens reuse the Hub operations role: whoever may publish from the Hub
 // operations page may issue a token that publishes on their behalf.
-func (s *Service) ListMCPTokens(ctx context.Context, subject string) ([]domain.MCPToken, error) {
-	if err := s.requireOperationsRole(ctx, subject, "app_ops_admin"); err != nil {
+func (s *Service) ListMCPTokens(ctx context.Context, subject, purposeInput string) ([]domain.MCPToken, error) {
+	purpose, role, err := mcpTokenPurpose(purposeInput)
+	if err != nil {
 		return nil, err
 	}
-	return s.repository.ListMCPTokens(ctx, subject)
+	if err := s.requireOperationsRole(ctx, subject, role); err != nil {
+		return nil, err
+	}
+	tokens, err := s.repository.ListMCPTokens(ctx, subject)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]domain.MCPToken, 0, len(tokens))
+	for _, token := range tokens {
+		tokenPurpose, _, err := mcpTokenPurpose(token.Purpose)
+		if err == nil && tokenPurpose == purpose {
+			token.Purpose = tokenPurpose
+			filtered = append(filtered, token)
+		}
+	}
+	return filtered, nil
 }
 
 func (s *Service) CreateMCPToken(ctx context.Context, subject string, input CreateMCPTokenInput) (CreateMCPTokenResult, error) {
-	if err := s.requireOperationsRole(ctx, subject, "app_ops_admin"); err != nil {
+	purpose, role, err := mcpTokenPurpose(input.Purpose)
+	if err != nil {
+		return CreateMCPTokenResult{}, err
+	}
+	if err := s.requireOperationsRole(ctx, subject, role); err != nil {
 		return CreateMCPTokenResult{}, err
 	}
 	name := strings.TrimSpace(input.Name)
@@ -47,7 +86,7 @@ func (s *Service) CreateMCPToken(ctx context.Context, subject string, input Crea
 	}
 	secret := mcpTokenPrefix + base64.RawURLEncoding.EncodeToString(raw)
 	now := time.Now().UTC()
-	token := domain.MCPToken{ID: newID("mcp"), LoginSubject: subject, Name: name,
+	token := domain.MCPToken{ID: newID("mcp"), LoginSubject: subject, Purpose: purpose, Name: name,
 		Prefix: secret[:10] + "••••" + secret[len(secret)-4:], CreatedAt: now, SecretHash: sha256.Sum256([]byte(secret))}
 	if input.ExpiresInDays > 0 {
 		expires := now.AddDate(0, 0, input.ExpiresInDays)
@@ -70,21 +109,25 @@ func (s *Service) RevokeMCPToken(ctx context.Context, subject, tokenID string) e
 // AuthenticateMCPToken resolves a bearer secret to its Login subject. Role
 // checks still run on every business call, so a revoked role disables the
 // token immediately.
-func (s *Service) AuthenticateMCPToken(ctx context.Context, secret string) (string, error) {
+func (s *Service) AuthenticateMCPToken(ctx context.Context, secret string) (MCPIdentity, error) {
 	invalid := domain.NewError(401, "mcp_token_invalid", "MCP 访问令牌无效、已过期或已吊销")
 	if !strings.HasPrefix(secret, mcpTokenPrefix) || len(secret) > 128 {
-		return "", invalid
+		return MCPIdentity{}, invalid
 	}
 	token, err := s.repository.MCPTokenBySecretHash(ctx, sha256.Sum256([]byte(secret)))
 	if err != nil || token.Status != "有效" {
-		return "", invalid
+		return MCPIdentity{}, invalid
 	}
-	if err := s.requireOperationsRole(ctx, token.LoginSubject, "app_ops_admin"); err != nil {
-		return "", err
+	purpose, role, err := mcpTokenPurpose(token.Purpose)
+	if err != nil {
+		return MCPIdentity{}, invalid
+	}
+	if err := s.requireOperationsRole(ctx, token.LoginSubject, role); err != nil {
+		return MCPIdentity{}, err
 	}
 	now := time.Now().UTC()
 	if token.LastUsedAt == nil || now.Sub(*token.LastUsedAt) > time.Hour {
 		_ = s.repository.TouchMCPToken(ctx, token.ID, now)
 	}
-	return token.LoginSubject, nil
+	return MCPIdentity{Subject: token.LoginSubject, Purpose: purpose, TokenID: token.ID}, nil
 }

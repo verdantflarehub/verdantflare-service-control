@@ -24,6 +24,7 @@ type Service struct {
 	repository               store.Repository
 	modelGateway             ModelGateway
 	accountGateway           GatewayAccounts
+	modelOpsGateway          ModelOpsGateway
 	loginDirectory           LoginDirectory
 	chartRegistryHost        string
 	chartRegistryURL         string
@@ -49,6 +50,12 @@ type GatewayAccounts interface {
 	ProbeKey(context.Context, string, int) (gateway.CenterProbe, error)
 	ExperienceChat(context.Context, string, int, string, string) (gateway.CenterChatResult, error)
 }
+
+type ModelOpsGateway interface {
+	Snapshot(context.Context, string) (gateway.ModelOpsSnapshot, error)
+}
+
+func (s *Service) SetModelOpsGateway(client ModelOpsGateway) { s.modelOpsGateway = client }
 
 func (s *Service) SetGatewayAccounts(accounts GatewayAccounts) { s.accountGateway = accounts }
 

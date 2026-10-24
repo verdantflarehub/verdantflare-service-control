@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestProductionRejectsDevelopmentSubject(t *testing.T) {
 	t.Setenv("CONTROL_ENV", "production")
@@ -38,6 +41,32 @@ func TestPartialGatewayConfigurationRejected(t *testing.T) {
 	t.Setenv("CONTROL_GATEWAY_TOKEN", "")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected partial gateway configuration to be rejected")
+	}
+}
+
+func TestModelOpsCredentialIsDistinctAndRequiresGateway(t *testing.T) {
+	serviceToken := strings.Repeat("m", 32)
+	t.Setenv("CONTROL_ENV", "development")
+	t.Setenv("CONTROL_GATEWAY_BASE_URL", "")
+	t.Setenv("CONTROL_GATEWAY_TOKEN", "")
+	t.Setenv("CONTROL_GATEWAY_MODEL_OPS_TOKEN", serviceToken)
+	if _, err := Load(); err == nil {
+		t.Fatal("model operations token without gateway origin accepted")
+	}
+	t.Setenv("CONTROL_GATEWAY_BASE_URL", "https://example.test")
+	t.Setenv("CONTROL_GATEWAY_TOKEN", serviceToken)
+	if _, err := Load(); err == nil {
+		t.Fatal("model operations token reused client token")
+	}
+	t.Setenv("CONTROL_GATEWAY_TOKEN", "client-token")
+	t.Setenv("CONTROL_GATEWAY_ADMIN_TOKEN", serviceToken)
+	if _, err := Load(); err == nil {
+		t.Fatal("model operations token reused organization token")
+	}
+	t.Setenv("CONTROL_GATEWAY_ADMIN_TOKEN", strings.Repeat("a", 32))
+	configuration, err := Load()
+	if err != nil || configuration.GatewayModelOpsToken != serviceToken {
+		t.Fatalf("distinct model operations token rejected: %v", err)
 	}
 }
 

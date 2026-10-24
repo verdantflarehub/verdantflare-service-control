@@ -46,7 +46,7 @@ func (s *Server) hubMCP(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, domain.NewError(401, "mcp_token_required", "缺少 Hub MCP 访问令牌"))
 		return
 	}
-	subject, err := s.service.AuthenticateMCPToken(r.Context(), strings.TrimSpace(secret))
+	identity, err := s.service.AuthenticateMCPToken(r.Context(), strings.TrimSpace(secret))
 	if err != nil {
 		var failure *domain.Error
 		if errors.As(err, &failure) && failure.Status == http.StatusUnauthorized {
@@ -92,7 +92,7 @@ func (s *Server) hubMCP(w http.ResponseWriter, r *http.Request) {
 	case "ping":
 		reply(map[string]any{})
 	case "tools/list":
-		reply(map[string]any{"tools": hubMCPTools()})
+		reply(map[string]any{"tools": hubMCPTools(identity.Purpose)})
 	case "tools/call":
 		var params struct {
 			Name      string          `json:"name"`
@@ -105,7 +105,7 @@ func (s *Server) hubMCP(w http.ResponseWriter, r *http.Request) {
 		if len(params.Arguments) == 0 {
 			params.Arguments = json.RawMessage("{}")
 		}
-		result, err := s.callHubMCPTool(r, subject, params.Name, params.Arguments)
+		result, err := s.callHubMCPTool(r, identity.Subject, identity.Purpose, params.Name, params.Arguments)
 		if err != nil {
 			failure, logInternal := publicationMCPFailure(err)
 			if logInternal {
@@ -116,7 +116,7 @@ func (s *Server) hubMCP(w http.ResponseWriter, r *http.Request) {
 			reply(map[string]any{"isError": true, "structuredContent": content, "content": mcpTextContent(content)})
 			return
 		}
-		s.logger.Info("hub mcp tool", "request_id", requestID(r.Context()), "tool", params.Name)
+		s.logger.Info("hub mcp tool", "request_id", requestID(r.Context()), "tool", params.Name, "token_id", identity.TokenID)
 		reply(map[string]any{"structuredContent": result, "content": mcpTextContent(result)})
 	default:
 		writeJSON(w, http.StatusOK, map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32601, "message": "不支持的方法"}})
@@ -128,7 +128,45 @@ func mcpTextContent(value any) []map[string]any {
 	return []map[string]any{{"type": "text", "text": string(text)}}
 }
 
-func (s *Server) callHubMCPTool(r *http.Request, subject, name string, arguments json.RawMessage) (any, error) {
+func (s *Server) callHubMCPTool(r *http.Request, subject, purpose, name string, arguments json.RawMessage) (any, error) {
+	if purpose == control.MCPTokenPurposeModel && strings.HasPrefix(name, "model_publish.") {
+		switch name {
+		case "model_publish.list":
+			return s.service.ListManagedModels(r.Context(), subject)
+		case "model_publish.gateway_models":
+			return s.service.ListGatewayModels(r.Context(), subject)
+		case "model_publish.gateway_snapshot":
+			var input struct {
+				ModelID string `json:"modelId"`
+			}
+			if err := json.Unmarshal(arguments, &input); err != nil {
+				return nil, err
+			}
+			return s.service.GatewayModelSnapshot(r.Context(), subject, input.ModelID)
+		case "model_publish.get":
+			var input struct {
+				ModelID string `json:"modelId"`
+			}
+			if err := json.Unmarshal(arguments, &input); err != nil {
+				return nil, err
+			}
+			models, err := s.service.ListManagedModels(r.Context(), subject)
+			if err != nil {
+				return nil, err
+			}
+			for _, model := range models {
+				if model.ID == input.ModelID {
+					return model, nil
+				}
+			}
+			return nil, domain.NewError(404, "MODEL_NOT_FOUND", "模型目录记录不存在")
+		default:
+			return nil, domain.NewError(404, "TOOL_NOT_FOUND", "模型工具尚未开放")
+		}
+	}
+	if purpose != control.MCPTokenPurposeApp || !strings.HasPrefix(name, "app_publish.") {
+		return nil, domain.NewError(403, "MCP_TOOL_FORBIDDEN", "此令牌不能调用该工具")
+	}
 	ctx := r.Context()
 	var appRef struct {
 		AppID string `json:"app_id"`
@@ -183,7 +221,7 @@ func (s *Server) callHubMCPTool(r *http.Request, subject, name string, arguments
 	}
 }
 
-func hubMCPTools() []hubMCPTool {
+func hubMCPTools(purpose string) []hubMCPTool {
 	stringField := map[string]any{"type": "string"}
 	integerField := map[string]any{"type": "integer"}
 	stringsField := map[string]any{"type": "array", "items": stringField}
@@ -193,6 +231,17 @@ func hubMCPTools() []hubMCPTool {
 			schema["required"] = required
 		}
 		return schema
+	}
+	if purpose == control.MCPTokenPurposeModel {
+		return []hubMCPTool{
+			{Name: "model_publish.list", Description: "只读列出 Control 中已登记的模型资料；不代表网关已配置或可调用。", InputSchema: object(map[string]any{})},
+			{Name: "model_publish.get", Description: "只读获取单个模型的 Control 目录资料；不包含供应商密钥。", InputSchema: object(map[string]any{"modelId": stringField}, "modelId")},
+			{Name: "model_publish.gateway_models", Description: "只读列出 Control 专用 Token 当前在网关可见的模型 ID；不能代替渠道健康或计费检查。", InputSchema: object(map[string]any{})},
+			{Name: "model_publish.gateway_snapshot", Description: "只读回读 new-api 中单个模型的脱敏渠道、计费和修订；未配置独立模型运营服务身份时不可用。", InputSchema: object(map[string]any{"modelId": stringField}, "modelId")},
+		}
+	}
+	if purpose != control.MCPTokenPurposeApp {
+		return []hubMCPTool{}
 	}
 	showcaseProperties := map[string]any{
 		"screenshots": stringsField, "highlights": stringsField, "whatsNew": stringField,
