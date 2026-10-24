@@ -85,6 +85,7 @@ func main() {
 			logger.Error("invalid model operations gateway configuration", "error", err)
 			os.Exit(1)
 		}
+		modelOpsGateway.SetCatalogToken(configuration.GatewayToken)
 		service.SetModelOpsGateway(modelOpsGateway)
 	}
 	sweepContext, stopSweep := context.WithCancel(context.Background())

@@ -44,7 +44,7 @@ func TestPublicCatalogUsesOnlyExplicitlyPublishedDatabaseRecords(t *testing.T) {
 		t.Fatal("bootstrap catalog must be empty")
 	}
 
-	input := domain.PublicModel{ID: "verified-model", Name: "Verified Model", Provider: "Provider", Summary: "Public summary", Categories: []string{"文本生成"}, InputPrice: "12", PriceUnit: "点/百万 tokens", PublicVisible: true}
+	input := domain.PublicModel{ID: "verified-model", Name: "Verified Model", Provider: "Provider", Summary: "Public summary", Categories: []string{"文本生成"}, InputPrice: "12", PriceUnit: "点/百万 tokens"}
 	created := request(t, server, http.MethodPost, "/api/control/ops/models", input)
 	if created.StatusCode != http.StatusCreated {
 		t.Fatalf("create model: %d %s", created.StatusCode, readBody(t, created))
@@ -63,11 +63,16 @@ func TestPublicCatalogUsesOnlyExplicitlyPublishedDatabaseRecords(t *testing.T) {
 		t.Fatal("draft leaked to public catalog")
 	}
 
+	input.PublicVisible = true
 	updated := request(t, server, http.MethodPatch, "/api/control/ops/models/verified-model", input)
-	if updated.StatusCode != http.StatusOK {
-		t.Fatalf("publish model: %d %s", updated.StatusCode, readBody(t, updated))
+	if updated.StatusCode != http.StatusConflict {
+		t.Fatalf("unvalidated model must not publish: %d %s", updated.StatusCode, readBody(t, updated))
 	}
 	updated.Body.Close()
+	// Seed an already-approved legacy record to test public projection separately.
+	if _, err := repository.UpdateManagedModelCAS(context.Background(), input.ID, draft.Revision, input); err != nil {
+		t.Fatal(err)
+	}
 	public := request(t, server, http.MethodGet, "/api/control/public/catalog", nil)
 	var catalog domain.PublicCatalog
 	decode(t, public, &catalog)
@@ -245,7 +250,8 @@ func TestPublishedModelsFollowGatewayForWWWAndHub(t *testing.T) {
 	gateway := &catalogGateway{models: map[string]struct{}{
 		"verdantflare-sd2": {}, "deepseek-flash": {}, "deepseek-v4-pro": {},
 	}, chatModels: map[string]struct{}{"deepseek-flash": {}, "deepseek-v4-pro": {}}}
-	service := control.NewService(store.NewMemoryBootstrap(), gateway)
+	repository := store.NewMemoryBootstrap()
+	service := control.NewService(repository, gateway)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := httptest.NewServer(httpapi.New(config.Config{Environment: "test", DevLoginSubject: "00000000-0000-4000-8000-000000000001"}, service, logger))
 	defer server.Close()
@@ -258,11 +264,10 @@ func TestPublishedModelsFollowGatewayForWWWAndHub(t *testing.T) {
 		}
 		created.Body.Close()
 		input.PublicVisible = true
-		published := request(t, server, http.MethodPatch, "/api/control/ops/models/"+id, input)
-		if published.StatusCode != http.StatusOK {
-			t.Fatalf("publish %s: %d %s", id, published.StatusCode, readBody(t, published))
+		// Existing approved records retain their WWW/Hub projection behavior.
+		if _, err := repository.UpdateManagedModel(context.Background(), id, input); err != nil {
+			t.Fatal(err)
 		}
-		published.Body.Close()
 	}
 	video := domain.PublicModel{ID: "verdantflare-sd2", Name: "Model verdantflare-sd2", Provider: "Verified", Summary: "Reviewed description", Categories: []string{"视频生成"}, PublicVisible: true, ExperienceMode: "chat"}
 	invalidExperience := request(t, server, http.MethodPatch, "/api/control/ops/models/verdantflare-sd2", video)

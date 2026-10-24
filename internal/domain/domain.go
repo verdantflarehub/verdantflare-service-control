@@ -298,6 +298,49 @@ type MCPToken struct {
 	SecretHash   [32]byte   `json:"-"`
 }
 
+// ModelCredentialTicket carries only upload intent. Supplier credential bytes
+// never enter this persisted Control state.
+type ModelCredentialTicket struct {
+	HandleHash              string    `json:"handleHash"`
+	Action                  string    `json:"action"`
+	TokenID                 string    `json:"tokenId"`
+	LoginSubject            string    `json:"loginSubject"`
+	ModelID                 string    `json:"modelId"`
+	UpstreamModelID         string    `json:"upstreamModelId"`
+	ChannelName             string    `json:"channelName"`
+	TargetChannelID         int       `json:"targetChannelId,omitempty"`
+	RequestID               string    `json:"requestId"`
+	ExpectedGatewayRevision string    `json:"expectedGatewayRevision"`
+	ExpiresAt               time.Time `json:"expiresAt"`
+	Status                  string    `json:"status"`
+	ChannelID               int       `json:"channelId,omitempty"`
+}
+
+type ModelProbeReceipt struct {
+	ModelID         string    `json:"modelId"`
+	RequestID       string    `json:"requestId"`
+	GatewayRevision string    `json:"gatewayRevision"`
+	BilledQuota     int       `json:"billedQuota"`
+	BilledUSD       float64   `json:"billedUsd"`
+	VerifiedAt      time.Time `json:"verifiedAt"`
+}
+
+// ModelPublicationStage records the cross-store commit point without storing
+// supplier credentials. An unknown gateway outcome must be reconciled, never
+// submitted again under a new request ID.
+type ModelPublicationStage struct {
+	ModelID               string    `json:"modelId"`
+	RequestID             string    `json:"requestId"`
+	SourceChannelID       int       `json:"sourceChannelId"`
+	PublicChannelID       int       `json:"publicChannelId,omitempty"`
+	ProbeGatewayRevision  string    `json:"probeGatewayRevision"`
+	StagedGatewayRevision string    `json:"stagedGatewayRevision,omitempty"`
+	ActiveGatewayRevision string    `json:"activeGatewayRevision,omitempty"`
+	CatalogRevision       int       `json:"catalogRevision"`
+	Status                string    `json:"status"`
+	UpdatedAt             time.Time `json:"updatedAt"`
+}
+
 type APITask struct {
 	ID             string `json:"id"`
 	OrganizationID string `json:"organizationId,omitempty"`

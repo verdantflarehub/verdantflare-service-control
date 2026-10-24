@@ -80,3 +80,73 @@ func TestModelOpsClientScopedWriteReadbackDoesNotForwardUnknownFields(t *testing
 		t.Fatalf("write readback forwarded unknown data: %s, %v", forwarded, err)
 	}
 }
+
+func TestModelOpsProbeRequiresSettledChargeAndDoesNotReturnProviderText(t *testing.T) {
+	const serviceToken = "model-ops-service-token-at-least-thirty-two-characters"
+	const requestID = "probe_request_0001"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+serviceToken {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/internal/center/model-ops/probe":
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"private provider response"}}],"usage":{"prompt_tokens":8,"completion_tokens":2}}`))
+		case "/api/internal/center/model-ops/probe/charges/" + requestID:
+			_, _ = w.Write([]byte(`{"success":true,"data":{"requestId":"probe_request_0001","modelId":"internal-test","billedQuota":500,"billedUsd":0.001,"maxUsd":0.01,"verified":true}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	client, err := NewModelOpsClient(server.URL, serviceToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := client.Probe(context.Background(), ModelOpsProbeInput{ModelID: "internal-test", RequestID: requestID,
+		ExpectedGatewayRevision: strings.Repeat("a", 64), MaxUSD: 0.01})
+	if err != nil || !receipt.Verified || receipt.BilledUSD != 0.001 {
+		t.Fatalf("receipt = %+v, err = %v", receipt, err)
+	}
+	encoded, err := json.Marshal(receipt)
+	if err != nil || strings.Contains(string(encoded), "private provider response") {
+		t.Fatalf("probe leaked response: %s, err = %v", encoded, err)
+	}
+}
+
+func TestModelOpsStageAddsServerSideCatalogTokenOnly(t *testing.T) {
+	const serviceToken = "model-ops-service-token-at-least-thirty-two-characters"
+	const catalogToken = "sk-catalog-test-token-never-in-mcp-arguments"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/internal/center/model-ops/channel/stage-public" || r.Header.Get("Authorization") != "Bearer "+serviceToken {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		var request struct {
+			CatalogToken string `json:"catalogToken"`
+			ModelID      string `json:"modelId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.CatalogToken != catalogToken || request.ModelID != "internal-test" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true,"data":{"modelId":"internal-test","sourceChannelId":3,"publicChannelId":4,"revision":"` + strings.Repeat("c", 64) + `","channels":[{"id":4}]}}`))
+	}))
+	defer server.Close()
+	client, err := NewModelOpsClient(server.URL, serviceToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.StagePublicRoute(context.Background(), ModelOpsPublicRouteInput{ModelID: "internal-test", SourceChannelID: 3}); err == nil {
+		t.Fatal("staged route without configured catalog token")
+	}
+	client.SetCatalogToken(catalogToken)
+	result, err := client.StagePublicRoute(context.Background(), ModelOpsPublicRouteInput{ModelID: "internal-test", SourceChannelID: 3})
+	if err != nil || result.PublicChannelID != 4 {
+		t.Fatalf("stage result = %+v, err = %v", result, err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil || strings.Contains(string(encoded), catalogToken) {
+		t.Fatalf("stage result exposed catalog token: %v", err)
+	}
+}

@@ -74,4 +74,13 @@ type Repository interface {
 	RevokeMCPToken(context.Context, string, string, time.Time) error
 	MCPTokenBySecretHash(context.Context, [32]byte) (domain.MCPToken, error)
 	TouchMCPToken(context.Context, string, time.Time) error
+	CreateModelCredentialTicket(context.Context, domain.ModelCredentialTicket) error
+	ConsumeModelCredentialTicket(context.Context, string, string, string, time.Time) (domain.ModelCredentialTicket, error)
+	ModelCredentialTicket(context.Context, string, string, string) (domain.ModelCredentialTicket, error)
+	FinishModelCredentialTicket(context.Context, string, string, int) error
+	SaveModelProbeReceipt(context.Context, domain.ModelProbeReceipt) error
+	ModelProbeReceipt(context.Context, string) (domain.ModelProbeReceipt, error)
+	BeginModelPublication(context.Context, domain.ModelPublicationStage) (domain.ModelPublicationStage, error)
+	ModelPublication(context.Context, string) (domain.ModelPublicationStage, error)
+	AdvanceModelPublication(context.Context, string, string, domain.ModelPublicationStage) (domain.ModelPublicationStage, error)
 }

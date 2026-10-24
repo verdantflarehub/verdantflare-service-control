@@ -1,6 +1,7 @@
 package httpapi_test
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -18,7 +19,8 @@ import (
 
 func TestModelExperienceHTTPFlow(t *testing.T) {
 	accounts := newAccountGatewayFixture()
-	service := control.NewService(store.NewMemoryBootstrap(), &catalogGateway{models: map[string]struct{}{"deepseek-flash": {}, "deepseek-v4-pro": {}}, chatModels: map[string]struct{}{"deepseek-flash": {}, "deepseek-v4-pro": {}}})
+	repository := store.NewMemoryBootstrap()
+	service := control.NewService(repository, &catalogGateway{models: map[string]struct{}{"deepseek-flash": {}, "deepseek-v4-pro": {}}, chatModels: map[string]struct{}{"deepseek-flash": {}, "deepseek-v4-pro": {}}})
 	service.SetGatewayAccounts(accounts)
 	server := httptest.NewServer(httpapi.New(config.Config{Environment: "test", DevLoginSubject: "00000000-0000-4000-8000-000000000001"}, service, slog.New(slog.NewTextHandler(io.Discard, nil))))
 	defer server.Close()
@@ -31,11 +33,9 @@ func TestModelExperienceHTTPFlow(t *testing.T) {
 	created.Body.Close()
 	model.PublicVisible = true
 	model.ExperienceMode = "chat"
-	published := request(t, server, http.MethodPatch, "/api/control/ops/models/deepseek-flash", model)
-	if published.StatusCode != http.StatusOK {
-		t.Fatalf("publish model: %d %s", published.StatusCode, readBody(t, published))
+	if _, err := repository.UpdateManagedModel(context.Background(), model.ID, model); err != nil {
+		t.Fatal(err)
 	}
-	published.Body.Close()
 
 	path := "/api/control/experience/model-runs"
 	accounts.keys["org_verdantflare"] = []gateway.CenterKey{{ID: 7, Name: "my-key", Status: "active", Models: []string{"deepseek-flash", "deepseek-v4-pro"}}}
@@ -138,11 +138,9 @@ func TestModelExperienceHTTPFlow(t *testing.T) {
 	unpublishedPro.Body.Close()
 	pro.ExperienceMode = ""
 	pro.PublicVisible = true
-	publishedPro := request(t, server, http.MethodPatch, "/api/control/ops/models/deepseek-v4-pro", pro)
-	if publishedPro.StatusCode != http.StatusOK {
-		t.Fatalf("publish second model: %d %s", publishedPro.StatusCode, readBody(t, publishedPro))
+	if _, err := repository.UpdateManagedModel(context.Background(), pro.ID, pro); err != nil {
+		t.Fatal(err)
 	}
-	publishedPro.Body.Close()
 	accounts.balances["org_verdantflare"] = gateway.CenterBalance{Enabled: true, RemainingQuota: 500000}
 	proInput := map[string]string{"requestId": "model_experience_request_003", "modelId": pro.ID, "keyId": "gw_7", "prompt": "介绍一下自己"}
 	disabled := request(t, server, http.MethodPost, path, proInput)

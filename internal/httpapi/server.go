@@ -118,6 +118,7 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("GET /api/control/station/v2/apps/{appID}/versions/{version}", server.stationAppVersionV2)
 	mux.HandleFunc("GET /api/control/station/v2/apps/{appID}/versions/{version}/install-grant/{organizationID}", server.stationInstallGrantV2)
 	mux.HandleFunc("POST /api/control/mcp", server.hubMCP)
+	mux.HandleFunc("PUT /api/control/mcp/credentials/{handle}", server.uploadModelCredential)
 
 	mux.HandleFunc("POST /api/control/ops/organizations", server.createManagedOrganization)
 	mux.HandleFunc("GET /api/control/ops/organizations/{organizationID}", server.getManagedOrganization)

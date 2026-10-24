@@ -101,11 +101,9 @@ func TestProviderIconUploadPublishesOnlyAfterModelSave(t *testing.T) {
 		t.Fatalf("draft leaked to public catalog: %+v", catalog.Models)
 	}
 	model.PublicVisible = true
-	published := request(t, server, http.MethodPatch, "/api/control/ops/models/icon-model", model)
-	if published.StatusCode != http.StatusOK {
-		t.Fatalf("publish with uploaded icon: %d %s", published.StatusCode, readBody(t, published))
+	if _, err := repository.UpdateManagedModel(context.Background(), model.ID, model); err != nil {
+		t.Fatal(err)
 	}
-	published.Body.Close()
 	public = request(t, server, http.MethodGet, "/api/control/public/catalog", nil)
 	decode(t, public, &catalog)
 	public.Body.Close()

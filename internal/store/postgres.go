@@ -19,24 +19,27 @@ type Postgres struct {
 }
 
 type persistedState struct {
-	Users         map[string]domain.CenterUser            `json:"users"`
-	Organizations map[string]domain.Organization          `json:"organizations"`
-	Apps          map[string]domain.App                   `json:"apps"`
-	AppVersions   map[string]map[string]domain.AppVersion `json:"appVersions"`
-	StationGrants map[string]domain.StationTestGrant      `json:"stationGrants"`
-	Entitlements  map[string]map[string]bool              `json:"entitlements"`
-	Sessions      map[string]domain.ExperienceSession     `json:"sessions"`
-	ModelRuns     map[string]domain.ModelExperienceRun    `json:"modelRuns"`
-	APIKeys       map[string]persistedAPIKey              `json:"apiKeys"`
-	MCPTokens     map[string]persistedMCPToken            `json:"mcpTokens,omitempty"`
-	Models        []domain.Model                          `json:"models"`
-	PublicModels  map[string]domain.PublicModel           `json:"publicModels"`
-	ModelIcons    map[string]domain.ModelProviderIcon     `json:"modelIcons,omitempty"`
-	Tasks         []domain.APITask                        `json:"tasks"`
-	Members       map[string][]domain.Member              `json:"members"`
-	Billing       map[string]domain.BillingSummary        `json:"billing"`
-	Releases      []domain.Release                        `json:"releases"`
-	OpsOrgs       []domain.OperationsOrganization         `json:"operationsOrganizations"`
+	Users              map[string]domain.CenterUser            `json:"users"`
+	Organizations      map[string]domain.Organization          `json:"organizations"`
+	Apps               map[string]domain.App                   `json:"apps"`
+	AppVersions        map[string]map[string]domain.AppVersion `json:"appVersions"`
+	StationGrants      map[string]domain.StationTestGrant      `json:"stationGrants"`
+	Entitlements       map[string]map[string]bool              `json:"entitlements"`
+	Sessions           map[string]domain.ExperienceSession     `json:"sessions"`
+	ModelRuns          map[string]domain.ModelExperienceRun    `json:"modelRuns"`
+	APIKeys            map[string]persistedAPIKey              `json:"apiKeys"`
+	MCPTokens          map[string]persistedMCPToken            `json:"mcpTokens,omitempty"`
+	CredentialTickets  map[string]domain.ModelCredentialTicket `json:"credentialTickets,omitempty"`
+	ModelProbeReceipts map[string]domain.ModelProbeReceipt     `json:"modelProbeReceipts,omitempty"`
+	ModelPublications  map[string]domain.ModelPublicationStage `json:"modelPublications,omitempty"`
+	Models             []domain.Model                          `json:"models"`
+	PublicModels       map[string]domain.PublicModel           `json:"publicModels"`
+	ModelIcons         map[string]domain.ModelProviderIcon     `json:"modelIcons,omitempty"`
+	Tasks              []domain.APITask                        `json:"tasks"`
+	Members            map[string][]domain.Member              `json:"members"`
+	Billing            map[string]domain.BillingSummary        `json:"billing"`
+	Releases           []domain.Release                        `json:"releases"`
+	OpsOrgs            []domain.OperationsOrganization         `json:"operationsOrganizations"`
 }
 
 // Keep the verifier in private repository state while domain.APIKey continues
@@ -136,7 +139,10 @@ func encodeMemory(m *Memory) ([]byte, error) {
 	raw, err := json.Marshal(persistedState{
 		Users: m.users, Organizations: m.organizations, Apps: m.apps, AppVersions: m.appVersions, StationGrants: m.stationGrants, Entitlements: m.entitlements,
 		Sessions: m.sessions, ModelRuns: m.modelRuns, APIKeys: keys, MCPTokens: tokens, Models: m.models, PublicModels: m.publicModels, ModelIcons: m.modelIcons, Tasks: m.tasks,
-		Members: m.members, Billing: m.billing, Releases: m.releases, OpsOrgs: m.opsOrgs,
+		CredentialTickets:  m.credentialTickets,
+		ModelProbeReceipts: m.modelProbeReceipts,
+		ModelPublications:  m.modelPublications,
+		Members:            m.members, Billing: m.billing, Releases: m.releases, OpsOrgs: m.opsOrgs,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("encode control repository: %w", err)
@@ -167,7 +173,10 @@ func decodeMemory(raw []byte) (*Memory, error) {
 	return &Memory{
 		users: state.Users, organizations: state.Organizations, apps: state.Apps, appVersions: state.AppVersions, stationGrants: state.StationGrants,
 		entitlements: state.Entitlements, sessions: state.Sessions, modelRuns: state.ModelRuns, apiKeys: keys, mcpTokens: tokens,
-		models: state.Models, publicModels: state.PublicModels, modelIcons: state.ModelIcons, tasks: state.Tasks, members: state.Members, billing: state.Billing,
+		credentialTickets:  state.CredentialTickets,
+		modelProbeReceipts: state.ModelProbeReceipts,
+		modelPublications:  state.ModelPublications,
+		models:             state.Models, publicModels: state.PublicModels, modelIcons: state.ModelIcons, tasks: state.Tasks, members: state.Members, billing: state.Billing,
 		releases: state.Releases, opsOrgs: state.OpsOrgs,
 	}, nil
 }
@@ -364,4 +373,63 @@ func (p *Postgres) MCPTokenBySecretHash(ctx context.Context, hash [32]byte) (dom
 }
 func (p *Postgres) TouchMCPToken(ctx context.Context, tokenID string, at time.Time) error {
 	return p.mutate(ctx, func(m *Memory) error { return m.TouchMCPToken(ctx, tokenID, at) })
+}
+
+func (p *Postgres) CreateModelCredentialTicket(ctx context.Context, ticket domain.ModelCredentialTicket) error {
+	return p.mutate(ctx, func(m *Memory) error { return m.CreateModelCredentialTicket(ctx, ticket) })
+}
+
+func (p *Postgres) ConsumeModelCredentialTicket(ctx context.Context, digest, tokenID, subject string, at time.Time) (result domain.ModelCredentialTicket, err error) {
+	err = p.mutate(ctx, func(m *Memory) error {
+		var operationErr error
+		result, operationErr = m.ConsumeModelCredentialTicket(ctx, digest, tokenID, subject, at)
+		return operationErr
+	})
+	return
+}
+
+func (p *Postgres) ModelCredentialTicket(ctx context.Context, digest, tokenID, subject string) (domain.ModelCredentialTicket, error) {
+	m, err := p.read(ctx)
+	if err != nil {
+		return domain.ModelCredentialTicket{}, err
+	}
+	return m.ModelCredentialTicket(ctx, digest, tokenID, subject)
+}
+
+func (p *Postgres) FinishModelCredentialTicket(ctx context.Context, digest, status string, channelID int) error {
+	return p.mutate(ctx, func(m *Memory) error { return m.FinishModelCredentialTicket(ctx, digest, status, channelID) })
+}
+
+func (p *Postgres) SaveModelProbeReceipt(ctx context.Context, receipt domain.ModelProbeReceipt) error {
+	return p.mutate(ctx, func(m *Memory) error { return m.SaveModelProbeReceipt(ctx, receipt) })
+}
+
+func (p *Postgres) ModelProbeReceipt(ctx context.Context, modelID string) (domain.ModelProbeReceipt, error) {
+	m, err := p.read(ctx)
+	if err != nil {
+		return domain.ModelProbeReceipt{}, err
+	}
+	return m.ModelProbeReceipt(ctx, modelID)
+}
+
+func (p *Postgres) BeginModelPublication(ctx context.Context, stage domain.ModelPublicationStage) (result domain.ModelPublicationStage, err error) {
+	err = p.mutate(ctx, func(m *Memory) error { var e error; result, e = m.BeginModelPublication(ctx, stage); return e })
+	return
+}
+
+func (p *Postgres) ModelPublication(ctx context.Context, modelID string) (domain.ModelPublicationStage, error) {
+	m, err := p.read(ctx)
+	if err != nil {
+		return domain.ModelPublicationStage{}, err
+	}
+	return m.ModelPublication(ctx, modelID)
+}
+
+func (p *Postgres) AdvanceModelPublication(ctx context.Context, modelID, expected string, stage domain.ModelPublicationStage) (result domain.ModelPublicationStage, err error) {
+	err = p.mutate(ctx, func(m *Memory) error {
+		var e error
+		result, e = m.AdvanceModelPublication(ctx, modelID, expected, stage)
+		return e
+	})
+	return
 }

@@ -17,24 +17,27 @@ type Memory struct {
 	mu      sync.RWMutex
 	surveys map[string]domain.SurveyState
 
-	users         map[string]domain.CenterUser
-	organizations map[string]domain.Organization
-	apps          map[string]domain.App
-	appVersions   map[string]map[string]domain.AppVersion
-	stationGrants map[string]domain.StationTestGrant
-	entitlements  map[string]map[string]bool
-	sessions      map[string]domain.ExperienceSession
-	modelRuns     map[string]domain.ModelExperienceRun
-	apiKeys       map[string]domain.APIKey
-	mcpTokens     map[string]domain.MCPToken
-	models        []domain.Model
-	publicModels  map[string]domain.PublicModel
-	modelIcons    map[string]domain.ModelProviderIcon
-	tasks         []domain.APITask
-	members       map[string][]domain.Member
-	billing       map[string]domain.BillingSummary
-	releases      []domain.Release
-	opsOrgs       []domain.OperationsOrganization
+	users              map[string]domain.CenterUser
+	organizations      map[string]domain.Organization
+	apps               map[string]domain.App
+	appVersions        map[string]map[string]domain.AppVersion
+	stationGrants      map[string]domain.StationTestGrant
+	entitlements       map[string]map[string]bool
+	sessions           map[string]domain.ExperienceSession
+	modelRuns          map[string]domain.ModelExperienceRun
+	apiKeys            map[string]domain.APIKey
+	mcpTokens          map[string]domain.MCPToken
+	credentialTickets  map[string]domain.ModelCredentialTicket
+	modelProbeReceipts map[string]domain.ModelProbeReceipt
+	modelPublications  map[string]domain.ModelPublicationStage
+	models             []domain.Model
+	publicModels       map[string]domain.PublicModel
+	modelIcons         map[string]domain.ModelProviderIcon
+	tasks              []domain.APITask
+	members            map[string][]domain.Member
+	billing            map[string]domain.BillingSummary
+	releases           []domain.Release
+	opsOrgs            []domain.OperationsOrganization
 }
 
 // NewMemoryBootstrap creates only the operational identity needed to provision
@@ -54,8 +57,11 @@ func NewMemoryBootstrap() *Memory {
 		organizations: map[string]domain.Organization{organizationID: {OrganizationID: organizationID, Name: "VerdantFlare", ShortName: "VF", EntitlementVersion: 1, Status: "正常"}},
 		apps:          map[string]domain.App{}, appVersions: map[string]map[string]domain.AppVersion{}, stationGrants: map[string]domain.StationTestGrant{}, entitlements: map[string]map[string]bool{organizationID: {}},
 		sessions: map[string]domain.ExperienceSession{}, apiKeys: map[string]domain.APIKey{},
-		modelRuns: map[string]domain.ModelExperienceRun{},
-		models:    []domain.Model{}, publicModels: map[string]domain.PublicModel{}, tasks: []domain.APITask{}, members: map[string][]domain.Member{},
+		modelRuns:          map[string]domain.ModelExperienceRun{},
+		credentialTickets:  map[string]domain.ModelCredentialTicket{},
+		modelProbeReceipts: map[string]domain.ModelProbeReceipt{},
+		modelPublications:  map[string]domain.ModelPublicationStage{},
+		models:             []domain.Model{}, publicModels: map[string]domain.PublicModel{}, tasks: []domain.APITask{}, members: map[string][]domain.Member{},
 		billing: map[string]domain.BillingSummary{}, releases: []domain.Release{}, opsOrgs: []domain.OperationsOrganization{},
 	}
 }

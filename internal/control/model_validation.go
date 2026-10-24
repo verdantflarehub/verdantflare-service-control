@@ -86,8 +86,22 @@ func (s *Service) ValidateModelPublication(ctx context.Context, subject, modelID
 	}
 	_, visible := available[modelID]
 	add("directory_token_exact_model_visible", visible)
-	// No paid probe receipt is implemented yet. Returning ready=true here would
-	// let a catalog-only change masquerade as a tested billable model.
-	add("bounded_actual_charge_probe", false)
+	receipt, receiptErr := s.repository.ModelProbeReceipt(ctx, modelID)
+	probeOK := receiptErr == nil && receipt.GatewayRevision == snapshot.Revision &&
+		receipt.BilledQuota > 0 && receipt.BilledUSD > 0 && receipt.BilledUSD <= 0.01
+	if !probeOK && receiptErr == nil {
+		stage, stageErr := s.repository.ModelPublication(ctx, modelID)
+		probeOK = stageErr == nil && stage.Status == "verified" && stage.ProbeGatewayRevision == receipt.GatewayRevision &&
+			stage.ActiveGatewayRevision == snapshot.Revision && stage.PublicChannelID > 0 &&
+			receipt.BilledQuota > 0 && receipt.BilledUSD > 0 && receipt.BilledUSD <= 0.01
+	}
+	add("bounded_actual_charge_probe", probeOK)
+	result.ActualChargeVerified = probeOK
+	result.Ready = true
+	for _, check := range result.Checks {
+		if !check.Passed {
+			result.Ready = false
+		}
+	}
 	return result, nil
 }

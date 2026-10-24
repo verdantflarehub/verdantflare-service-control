@@ -228,8 +228,8 @@ func (s *Service) CreateManagedModel(ctx context.Context, subject string, model 
 		return domain.PublicModel{}, err
 	}
 	model.ID = strings.TrimSpace(model.ID)
-	if model.ExperienceMode != "" {
-		return domain.PublicModel{}, domain.NewError(400, "experience_requires_publication", "请先创建并上架模型，再单独开放在线体验")
+	if model.ExperienceMode != "" || model.PublicVisible {
+		return domain.PublicModel{}, domain.NewError(400, "model_draft_required", "新模型须先创建草稿，再通过受控上架流程公开")
 	}
 	if err := validatePublicModel(model); err != nil {
 		return domain.PublicModel{}, err
@@ -245,6 +245,17 @@ func (s *Service) UpdateManagedModel(ctx context.Context, subject, id string, mo
 		return domain.PublicModel{}, err
 	}
 	model.ID = id
+	if model.PublicVisible {
+		managed, err := s.repository.ListManagedModels(ctx)
+		if err != nil {
+			return domain.PublicModel{}, err
+		}
+		for _, current := range managed {
+			if current.ID == id && !current.PublicVisible {
+				return domain.PublicModel{}, domain.NewError(409, "MODEL_PUBLISH_FLOW_REQUIRED", "模型公开须经受控上架流程")
+			}
+		}
+	}
 	if err := validatePublicModel(model); err != nil {
 		return domain.PublicModel{}, err
 	}

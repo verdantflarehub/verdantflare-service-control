@@ -103,7 +103,8 @@ func (f *accountGatewayFixture) ExperienceChat(_ context.Context, _ string, keyI
 func TestAPIKeyCreditAndReadOnlyProbeHTTPFlow(t *testing.T) {
 	accounts := newAccountGatewayFixture()
 	models := &catalogGateway{models: map[string]struct{}{"deepseek-flash": {}}}
-	service := control.NewService(store.NewMemoryBootstrap(), models)
+	repository := store.NewMemoryBootstrap()
+	service := control.NewService(repository, models)
 	service.SetGatewayAccounts(accounts)
 	server := httptest.NewServer(httpapi.New(config.Config{Environment: "test", DevLoginSubject: "00000000-0000-4000-8000-000000000001"}, service, slog.New(slog.NewTextHandler(io.Discard, nil))))
 	defer server.Close()
@@ -115,11 +116,9 @@ func TestAPIKeyCreditAndReadOnlyProbeHTTPFlow(t *testing.T) {
 	}
 	createdModel.Body.Close()
 	model.PublicVisible = true
-	published := request(t, server, http.MethodPatch, "/api/control/ops/models/deepseek-flash", model)
-	if published.StatusCode != http.StatusOK {
-		t.Fatalf("model publish: %d %s", published.StatusCode, readBody(t, published))
+	if _, err := repository.UpdateManagedModel(context.Background(), model.ID, model); err != nil {
+		t.Fatal(err)
 	}
-	published.Body.Close()
 
 	creditPath := "/api/control/ops/organizations/org_verdantflare/api-credit"
 	for _, invalid := range []map[string]any{
