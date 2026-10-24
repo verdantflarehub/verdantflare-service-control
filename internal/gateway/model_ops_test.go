@@ -18,7 +18,7 @@ func TestModelOpsClientSnapshot(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"success":true,"data":{"modelId":"minimax/h3","revision":"` + strings.Repeat("a", 64) + `","channels":[{"id":1,"name":"safe","key":"should-not-forward","credentialConfigured":true}],"pricing":{"billingMode":"ratio","supplierPassword":"should-not-forward"},"metadata":{"exists":false}}}`))
+		_, _ = w.Write([]byte(`{"success":true,"data":{"modelId":"minimax/h3","revision":"` + strings.Repeat("a", 64) + `","channels":[{"id":1,"name":"safe","key":"should-not-forward","credentialConfigured":true}],"pricing":{"billingMode":"ratio","supplierPassword":"should-not-forward"},"metadata":{"exists":true,"status":0}}}`))
 	}))
 	defer server.Close()
 	client, err := NewModelOpsClient(server.URL, serviceToken)
@@ -32,6 +32,9 @@ func TestModelOpsClientSnapshot(t *testing.T) {
 	forwarded, err := json.Marshal(snapshot)
 	if err != nil || strings.Contains(string(forwarded), "should-not-forward") {
 		t.Fatalf("snapshot forwarded unexpected gateway fields: %s, %v", forwarded, err)
+	}
+	if !strings.Contains(string(forwarded), `"status":0`) {
+		t.Fatalf("disabled model status was lost: %s", forwarded)
 	}
 }
 

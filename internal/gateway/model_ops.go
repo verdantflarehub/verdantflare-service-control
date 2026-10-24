@@ -53,7 +53,7 @@ type ModelOpsPricing struct {
 
 type ModelOpsMetadata struct {
 	Exists      bool   `json:"exists"`
-	Status      int    `json:"status,omitempty"`
+	Status      int    `json:"status"`
 	Description string `json:"description,omitempty"`
 	Endpoints   string `json:"endpoints,omitempty"`
 }
