@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/verdantflarehub/verdantflare-service-control/internal/control"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
 )
 
@@ -27,5 +28,23 @@ func TestPublicationMCPFailurePreservesFailureClass(t *testing.T) {
 				t.Fatalf("failure = %+v, internal = %t", failure, internal)
 			}
 		})
+	}
+}
+
+func TestModelMCPFailureUsesModelErrorVocabulary(t *testing.T) {
+	for _, tc := range []struct {
+		err      error
+		status   int
+		code     string
+		internal bool
+	}{
+		{err: domain.NewError(503, "model_gateway_ops_unavailable", "unconfigured"), status: 503, code: "model_gateway_ops_unavailable"},
+		{err: &json.SyntaxError{}, status: 400, code: "MODEL_ARGUMENTS_INVALID"},
+		{err: errors.New("gateway timeout"), status: 503, code: "MODEL_CONFIG_UNAVAILABLE", internal: true},
+	} {
+		failure, internal := hubMCPFailure(tc.err, control.MCPTokenPurposeModel)
+		if failure.Status != tc.status || failure.Code != tc.code || internal != tc.internal {
+			t.Fatalf("failure = %+v, internal = %t", failure, internal)
+		}
 	}
 }

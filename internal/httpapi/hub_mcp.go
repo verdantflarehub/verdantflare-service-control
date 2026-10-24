@@ -37,6 +37,22 @@ func publicationMCPFailure(err error) (*domain.Error, bool) {
 	return domain.NewError(http.StatusServiceUnavailable, "PUBLISH_UNAVAILABLE", "应用发布服务暂时不可用，请回读状态后重试"), true
 }
 
+func hubMCPFailure(err error, purpose string) (*domain.Error, bool) {
+	if purpose != control.MCPTokenPurposeModel {
+		return publicationMCPFailure(err)
+	}
+	var failure *domain.Error
+	if errors.As(err, &failure) {
+		return failure, false
+	}
+	var syntax *json.SyntaxError
+	var inputType *json.UnmarshalTypeError
+	if errors.As(err, &syntax) || errors.As(err, &inputType) {
+		return domain.NewError(http.StatusBadRequest, "MODEL_ARGUMENTS_INVALID", "模型工具参数无效"), false
+	}
+	return domain.NewError(http.StatusServiceUnavailable, "MODEL_CONFIG_UNAVAILABLE", "模型配置回读暂时不可用，请稍后重试"), true
+}
+
 // hubMCP serves the Hub Market MCP. The bearer is a Hub MCP token; Login
 // session headers and the development subject are never consulted here.
 func (s *Server) hubMCP(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +123,7 @@ func (s *Server) hubMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		result, err := s.callHubMCPTool(r, identity.Subject, identity.Purpose, params.Name, params.Arguments)
 		if err != nil {
-			failure, logInternal := publicationMCPFailure(err)
+			failure, logInternal := hubMCPFailure(err, identity.Purpose)
 			if logInternal {
 				s.logger.Error("hub mcp tool failed", "request_id", requestID(r.Context()), "tool", params.Name, "error", err)
 			}
