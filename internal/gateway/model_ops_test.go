@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,7 +18,7 @@ func TestModelOpsClientSnapshot(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"success":true,"data":{"modelId":"minimax/h3","revision":"` + strings.Repeat("a", 64) + `","channels":[],"pricing":{},"metadata":{"exists":false}}}`))
+		_, _ = w.Write([]byte(`{"success":true,"data":{"modelId":"minimax/h3","revision":"` + strings.Repeat("a", 64) + `","channels":[{"id":1,"name":"safe","key":"should-not-forward","credentialConfigured":true}],"pricing":{"billingMode":"ratio","supplierPassword":"should-not-forward"},"metadata":{"exists":false}}}`))
 	}))
 	defer server.Close()
 	client, err := NewModelOpsClient(server.URL, serviceToken)
@@ -27,6 +28,10 @@ func TestModelOpsClientSnapshot(t *testing.T) {
 	snapshot, err := client.Snapshot(context.Background(), "minimax/h3")
 	if err != nil || snapshot.ModelID != "minimax/h3" || len(snapshot.Revision) != 64 {
 		t.Fatalf("snapshot = %+v, err = %v", snapshot, err)
+	}
+	forwarded, err := json.Marshal(snapshot)
+	if err != nil || strings.Contains(string(forwarded), "should-not-forward") {
+		t.Fatalf("snapshot forwarded unexpected gateway fields: %s, %v", forwarded, err)
 	}
 }
 
