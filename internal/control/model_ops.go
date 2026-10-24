@@ -275,7 +275,7 @@ func (s *Service) GatewayModelProbeStatus(ctx context.Context, subject, modelID,
 		return domain.ModelProbeReceipt{}, domain.NewError(503, "MODEL_CONFIG_UNAVAILABLE", "网关探针账单接口尚未接入")
 	}
 	charge, err := client.ProbeCharge(ctx, requestID)
-	if err != nil || charge.ModelID != modelID || !charge.Verified || charge.BilledUSD <= 0 || charge.BilledUSD > 0.01 {
+	if err != nil || charge.ModelID != modelID || charge.GatewayRevision != revision || !charge.Verified || charge.BilledUSD <= 0 || charge.BilledUSD > 0.01 {
 		return domain.ModelProbeReceipt{}, domain.NewError(409, "MODEL_PROBE_NOT_SETTLED", "探针账单尚未确认；勿重复提交")
 	}
 	snapshot, err := s.modelOpsGateway.Snapshot(ctx, modelID)

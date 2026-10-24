@@ -93,7 +93,7 @@ func TestModelOpsProbeRequiresSettledChargeAndDoesNotReturnProviderText(t *testi
 		case "/api/internal/center/model-ops/probe":
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"private provider response"}}],"usage":{"prompt_tokens":8,"completion_tokens":2}}`))
 		case "/api/internal/center/model-ops/probe/charges/" + requestID:
-			_, _ = w.Write([]byte(`{"success":true,"data":{"requestId":"probe_request_0001","modelId":"internal-test","billedQuota":500,"billedUsd":0.001,"maxUsd":0.01,"verified":true}}`))
+			_, _ = w.Write([]byte(`{"success":true,"data":{"requestId":"probe_request_0001","modelId":"internal-test","gatewayRevision":"` + strings.Repeat("a", 64) + `","billedQuota":500,"billedUsd":0.001,"maxUsd":0.01,"verified":true}}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -111,6 +111,35 @@ func TestModelOpsProbeRequiresSettledChargeAndDoesNotReturnProviderText(t *testi
 	encoded, err := json.Marshal(receipt)
 	if err != nil || strings.Contains(string(encoded), "private provider response") {
 		t.Fatalf("probe leaked response: %s, err = %v", encoded, err)
+	}
+}
+
+func TestModelOpsProbeRejectsChargeFromDifferentConfiguration(t *testing.T) {
+	const serviceToken = "model-ops-service-token-at-least-thirty-two-characters"
+	const requestID = "probe_request_wrong_revision"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+serviceToken {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/internal/center/model-ops/probe":
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+		case "/api/internal/center/model-ops/probe/charges/" + requestID:
+			_, _ = w.Write([]byte(`{"success":true,"data":{"requestId":"` + requestID + `","modelId":"internal-test","gatewayRevision":"` + strings.Repeat("b", 64) + `","billedQuota":500,"billedUsd":0.001,"maxUsd":0.01,"verified":true}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	client, err := NewModelOpsClient(server.URL, serviceToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Probe(context.Background(), ModelOpsProbeInput{ModelID: "internal-test", RequestID: requestID,
+		ExpectedGatewayRevision: strings.Repeat("a", 64), MaxUSD: 0.01})
+	if err == nil {
+		t.Fatal("accepted charge from a different model configuration")
 	}
 }
 

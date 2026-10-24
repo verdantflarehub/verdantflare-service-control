@@ -133,12 +133,13 @@ type ModelOpsProbeInput struct {
 }
 
 type ModelOpsProbeCharge struct {
-	RequestID   string  `json:"requestId"`
-	ModelID     string  `json:"modelId"`
-	BilledQuota int     `json:"billedQuota"`
-	BilledUSD   float64 `json:"billedUsd"`
-	MaxUSD      float64 `json:"maxUsd"`
-	Verified    bool    `json:"verified"`
+	RequestID       string  `json:"requestId"`
+	ModelID         string  `json:"modelId"`
+	GatewayRevision string  `json:"gatewayRevision"`
+	BilledQuota     int     `json:"billedQuota"`
+	BilledUSD       float64 `json:"billedUsd"`
+	MaxUSD          float64 `json:"maxUsd"`
+	Verified        bool    `json:"verified"`
 }
 
 type ModelOpsProbeReceipt struct {
@@ -488,7 +489,7 @@ func (c *ModelOpsClient) Probe(ctx context.Context, input ModelOpsProbeInput) (M
 		return ModelOpsProbeReceipt{}, errors.New("model probe response invalid; check charge by request ID")
 	}
 	charge, err := c.ProbeCharge(ctx, input.RequestID)
-	if err != nil || charge.ModelID != input.ModelID {
+	if err != nil || charge.ModelID != input.ModelID || charge.GatewayRevision != input.ExpectedGatewayRevision {
 		return ModelOpsProbeReceipt{}, errors.New("model probe charge not verified; check charge by request ID")
 	}
 	return ModelOpsProbeReceipt{ModelOpsProbeCharge: charge, GatewayRevision: input.ExpectedGatewayRevision,
