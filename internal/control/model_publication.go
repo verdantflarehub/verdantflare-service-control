@@ -41,7 +41,8 @@ func (s *Service) PublishModel(ctx context.Context, subject string, input Publis
 	if err := validateModelOpsWrite(input.ModelID, input.RequestID, input.ExpectedGatewayRevision); err != nil {
 		return ModelPublicationResult{}, err
 	}
-	if input.SourceChannelID <= 0 || input.ExpectedCatalogRevision <= 0 || input.LegacyChannelID < 0 ||
+	if input.SourceChannelID <= 0 || input.ExpectedCatalogRevision < 0 ||
+		(input.LegacyChannelID == 0 && input.ExpectedCatalogRevision == 0) || input.LegacyChannelID < 0 ||
 		(input.LegacyChannelID > 0 && !legacyModelID(input.ModelID)) {
 		return ModelPublicationResult{}, domain.NewError(400, "MODEL_CONFIG_INVALID", "渠道或目录修订无效")
 	}
@@ -104,7 +105,11 @@ func (s *Service) PublishModel(ctx context.Context, subject string, input Publis
 	if source == nil || source.Status != 1 || !source.CredentialConfigured || source.UpstreamModel == "" || source.Type != 43 || len(source.Groups) != 1 || source.Groups[0] != "center-internal" {
 		return ModelPublicationResult{}, domain.NewError(409, "MODEL_CHANNEL_NOT_DEDICATED", "来源渠道不是已启用的内部专用渠道")
 	}
-	if !snapshot.Metadata.Exists || snapshot.Metadata.Status != 1 || snapshot.Metadata.Endpoints != "/v1/chat/completions" {
+	endpointReady := snapshot.Metadata.Endpoints == "/v1/chat/completions"
+	if input.LegacyChannelID > 0 {
+		endpointReady = legacyTextEndpoint(snapshot.Metadata.Endpoints)
+	}
+	if !snapshot.Metadata.Exists || snapshot.Metadata.Status != 1 || !endpointReady {
 		return ModelPublicationResult{}, domain.NewError(409, "MODEL_METADATA_NOT_READY", "网关模型元数据未就绪")
 	}
 	priced := (snapshot.Pricing.BillingMode == "tiered_expr" && strings.TrimSpace(snapshot.Pricing.BillingExpr) != "") ||

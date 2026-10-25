@@ -2,6 +2,8 @@ package control
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 
 	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/gateway"
@@ -11,6 +13,17 @@ const legacyV4ProBillingExpr = `(weekday("UTC") >= 1 && weekday("UTC") <= 5 && (
 
 func legacyModelID(modelID string) bool {
 	return modelID == "deepseek-flash" || modelID == "deepseek-v4-pro"
+}
+
+// Existing DeepSeek records predate the endpoint-path metadata convention.
+// Accept only their single OpenAI-compatible text endpoint during an in-place
+// migration; new models must still declare the explicit chat-completions path.
+func legacyTextEndpoint(raw string) bool {
+	if strings.TrimSpace(raw) == "/v1/chat/completions" {
+		return true
+	}
+	var endpoints []string
+	return json.Unmarshal([]byte(raw), &endpoints) == nil && len(endpoints) == 1 && endpoints[0] == "openai"
 }
 
 type LegacyModelPreview struct {
@@ -38,8 +51,10 @@ func (s *Service) PreviewLegacyModel(ctx context.Context, subject, modelID strin
 		return LegacyModelPreview{}, err
 	}
 	result := LegacyModelPreview{ModelID: modelID}
+	found := false
 	for _, item := range models {
 		if item.ID == modelID {
+			found = true
 			result.CatalogRevision = item.Revision
 			if !item.PublicVisible {
 				result.BlockReason = "目录未公开"
@@ -47,7 +62,7 @@ func (s *Service) PreviewLegacyModel(ctx context.Context, subject, modelID strin
 			break
 		}
 	}
-	if result.CatalogRevision == 0 {
+	if !found {
 		return LegacyModelPreview{}, domain.NewError(404, "MODEL_NOT_FOUND", "存量模型不存在")
 	}
 	snapshot, err := s.modelOpsGateway.Snapshot(ctx, modelID)

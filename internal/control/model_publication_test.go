@@ -18,6 +18,31 @@ type publicationGateway struct {
 	activateFails int
 }
 
+type legacyRevisionZeroStore struct {
+	store.Repository
+	modelID string
+}
+
+func (r legacyRevisionZeroStore) ListManagedModels(ctx context.Context) ([]domain.PublicModel, error) {
+	models, err := r.Repository.ListManagedModels(ctx)
+	for i := range models {
+		if models[i].ID == r.modelID {
+			models[i].Revision = 0
+		}
+	}
+	return models, err
+}
+
+func (r legacyRevisionZeroStore) PublicCatalog(ctx context.Context) (domain.PublicCatalog, error) {
+	catalog, err := r.Repository.PublicCatalog(ctx)
+	for i := range catalog.Models {
+		if catalog.Models[i].ID == r.modelID {
+			catalog.Models[i].Revision = 0
+		}
+	}
+	return catalog, err
+}
+
 func (g *publicationGateway) Snapshot(context.Context, string) (gateway.ModelOpsSnapshot, error) {
 	return g.snapshot, nil
 }
@@ -204,10 +229,12 @@ func TestLegacyModelPublicationKeepsPublicCatalogWhileReplacingRoute(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	public.Revision = 0 // Existing production records retain the initial revision.
+	legacyRepo := legacyRevisionZeroStore{Repository: repo, modelID: modelID}
 	ratio := 0.75
 	revision := strings.Repeat("a", 64)
 	g := &publicationGateway{snapshot: gateway.ModelOpsSnapshot{ModelID: modelID, Revision: revision,
-		Metadata: gateway.ModelOpsMetadata{Exists: true, Status: 1, Endpoints: "/v1/chat/completions"},
+		Metadata: gateway.ModelOpsMetadata{Exists: true, Status: 1, Endpoints: `["openai"]`},
 		Pricing:  gateway.ModelOpsPricing{BillingMode: "ratio", ModelRatio: &ratio},
 		Channels: []gateway.ModelOpsChannel{
 			{ID: 1, Name: "internal", Type: 43, Status: 1, CredentialConfigured: true,
@@ -219,9 +246,13 @@ func TestLegacyModelPublicationKeepsPublicCatalogWhileReplacingRoute(t *testing.
 		GatewayRevision: revision, BilledQuota: 10, BilledUSD: 0.001, VerifiedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewService(repo, publicationDirectory{gateway: g, modelID: modelID})
+	svc := NewService(legacyRepo, publicationDirectory{gateway: g, modelID: modelID})
 	svc.SetModelOpsGateway(g)
 	subject := "00000000-0000-4000-8000-000000000001"
+	preview, err := svc.PreviewLegacyModel(ctx, subject, modelID)
+	if err != nil || !preview.Eligible || preview.CatalogRevision != 0 {
+		t.Fatalf("zero-revision legacy preview: %+v, %v", preview, err)
+	}
 	before, err := svc.PublicCatalog(ctx)
 	if err != nil || len(before.Models) != 1 {
 		t.Fatalf("legacy model unavailable before migration: %+v, %v", before.Models, err)
@@ -248,6 +279,24 @@ func TestLegacyModelPublicationKeepsPublicCatalogWhileReplacingRoute(t *testing.
 	after, err = svc.PublicCatalog(ctx)
 	if err != nil || len(after.Models) != 1 || after.Models[0].Revision != public.Revision {
 		t.Fatalf("public catalog changed by rollback: %+v, %v", after.Models, err)
+	}
+}
+
+func TestLegacyTextEndpointAllowsOnlyExistingTextProtocol(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{`/v1/chat/completions`, true},
+		{`["openai"]`, true},
+		{`["openai", "images"]`, false},
+		{`["images"]`, false},
+		{`openai`, false},
+		{`/v1/images/generations`, false},
+	} {
+		if got := legacyTextEndpoint(tc.value); got != tc.want {
+			t.Fatalf("legacy endpoint %q: got %v, want %v", tc.value, got, tc.want)
+		}
 	}
 }
 
