@@ -14,7 +14,12 @@ func (m *Memory) BeginModelPublication(_ context.Context, stage domain.ModelPubl
 		m.modelPublications = map[string]domain.ModelPublicationStage{}
 	}
 	if prior, exists := m.modelPublications[stage.ModelID]; exists {
-		return prior, domain.NewError(409, "MODEL_PUBLICATION_IN_PROGRESS", "模型上架已有未完成阶段，请先恢复或人工核对")
+		if prior.Status != "aborted" && prior.Status != "rolled_back" {
+			return prior, domain.NewError(409, "MODEL_PUBLICATION_IN_PROGRESS", "模型上架已有未完成阶段，请先恢复或人工核对")
+		}
+		if prior.RequestID == stage.RequestID {
+			return prior, domain.NewError(409, "MODEL_PUBLICATION_IN_PROGRESS", "新一轮上架必须使用新的请求 ID")
+		}
 	}
 	stage.Status = "staging"
 	stage.UpdatedAt = time.Now().UTC()

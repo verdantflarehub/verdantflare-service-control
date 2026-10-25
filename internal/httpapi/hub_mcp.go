@@ -159,6 +159,31 @@ func (s *Server) callHubMCPTool(r *http.Request, identity control.MCPIdentity, n
 	subject, purpose := identity.Subject, identity.Purpose
 	if purpose == control.MCPTokenPurposeModel && strings.HasPrefix(name, "model_publish.") {
 		switch name {
+		case "model_publish.legacy.preview":
+			var input struct {
+				ModelID string `json:"modelId"`
+			}
+			if err := decodeModelMCPWriteArguments(arguments, &input); err != nil {
+				return nil, err
+			}
+			return s.service.PreviewLegacyModel(r.Context(), subject, input.ModelID)
+		case "model_publish.legacy.prepare":
+			var input gateway.ModelOpsLegacyPrepareInput
+			if err := decodeModelMCPWriteArguments(arguments, &input); err != nil {
+				return nil, err
+			}
+			return s.service.PrepareLegacyModel(r.Context(), subject, input)
+		case "model_publish.legacy.abort", "model_publish.legacy.rollback":
+			var input gateway.ModelOpsLegacyRecoveryInput
+			if err := decodeModelMCPWriteArguments(arguments, &input); err != nil {
+				return nil, err
+			}
+			if name == "model_publish.legacy.abort" {
+				input.Action = "abort"
+			} else {
+				input.Action = "rollback"
+			}
+			return s.service.RecoverLegacyModel(r.Context(), subject, input)
 		case "model_publish.publish":
 			var input control.PublishModelInput
 			if err := decodeModelMCPWriteArguments(arguments, &input); err != nil {
@@ -391,6 +416,10 @@ func hubMCPTools(purpose string) []hubMCPTool {
 	}
 	if purpose == control.MCPTokenPurposeModel {
 		return []hubMCPTool{
+			{Name: "model_publish.legacy.preview", Description: "只读预检两个现有 DeepSeek 模型的旧默认路由、原计费与目录修订；不会返回供应商密钥。", InputSchema: object(map[string]any{"modelId": stringField}, "modelId")},
+			{Name: "model_publish.legacy.prepare", Description: "仅对两个指定 DeepSeek 存量模型，由 new-api 内部复制旧渠道凭据与上游映射至单模型内部渠道；旧客户路由不变，绝不在 MCP 参数中传密钥。", InputSchema: object(map[string]any{"modelId": stringField, "legacyChannelId": integerField, "requestId": stringField, "expectedGatewayRevision": stringField}, "modelId", "legacyChannelId", "requestId", "expectedGatewayRevision")},
+			{Name: "model_publish.legacy.abort", Description: "仅在存量模型切换前，按持久阶段和旧路由修订中止禁用的新路由；网络结果不明须原请求 ID 重试。", InputSchema: object(map[string]any{"modelId": stringField, "legacyChannelId": integerField, "sourceChannelId": integerField, "publicChannelId": integerField, "requestId": stringField, "expectedGatewayRevision": stringField}, "modelId", "legacyChannelId", "sourceChannelId", "publicChannelId", "requestId", "expectedGatewayRevision")},
+			{Name: "model_publish.legacy.rollback", Description: "仅在存量模型切换后，按持久阶段与修订原子恢复旧共享路由并撤除新路由；结果不明须原请求 ID 重试。", InputSchema: object(map[string]any{"modelId": stringField, "legacyChannelId": integerField, "sourceChannelId": integerField, "publicChannelId": integerField, "requestId": stringField, "expectedGatewayRevision": stringField}, "modelId", "legacyChannelId", "sourceChannelId", "publicChannelId", "requestId", "expectedGatewayRevision")},
 			{Name: "model_publish.list", Description: "只读列出 Control 中已登记的模型资料；不代表网关已配置或可调用。", InputSchema: object(map[string]any{})},
 			{Name: "model_publish.get", Description: "只读获取单个模型的 Control 目录资料；不包含供应商密钥。", InputSchema: object(map[string]any{"modelId": stringField}, "modelId")},
 			{Name: "model_publish.gateway_models", Description: "只读列出 Control 专用 Token 当前在网关可见的模型 ID；不能代替渠道健康或计费检查。", InputSchema: object(map[string]any{})},
@@ -411,7 +440,7 @@ func hubMCPTools(purpose string) []hubMCPTool {
 			{Name: "model_publish.probe.status", Description: "按请求 ID 只读回查 new-api 的探针结算并恢复 Control 收据；不再次调用上游。", InputSchema: object(map[string]any{"modelId": stringField, "requestId": stringField, "expectedGatewayRevision": stringField}, "modelId", "requestId", "expectedGatewayRevision")},
 			{Name: "model_publish.draft.save", Description: "仅保存不可公开、不开启体验的 Control 模型目录草稿；existing 记录须提供 expectedRevision。", InputSchema: object(map[string]any{"model": object(map[string]any{"id": stringField, "name": stringField, "provider": stringField, "summary": stringField, "categories": stringsField, "context": stringField, "maxInput": stringField, "maxOutput": stringField, "inputPrice": stringField, "outputPrice": stringField, "cachePrice": stringField, "priceUnit": stringField, "providerIconUrl": stringField}, "id", "name", "provider", "summary", "categories"), "expectedRevision": integerField}, "model", "expectedRevision")},
 			{Name: "model_publish.unpublish", Description: "按 Control 目录修订关闭公开与在线体验；不删除或停用 new-api 渠道。", InputSchema: object(map[string]any{"modelId": stringField, "expectedRevision": integerField}, "modelId", "expectedRevision")},
-			{Name: "model_publish.publish", Description: "用已结算的内部探针将模型分阶段公开：预备禁用的 default 路由、CAS 更新目录、启用路由并双端回读；结果不明时先查阶段，勿换请求 ID 重试。", InputSchema: object(map[string]any{"modelId": stringField, "sourceChannelId": integerField, "expectedCatalogRevision": integerField, "expectedGatewayRevision": stringField, "requestId": stringField}, "modelId", "sourceChannelId", "expectedCatalogRevision", "expectedGatewayRevision", "requestId")},
+			{Name: "model_publish.publish", Description: "用已结算的内部探针将模型分阶段公开；存量 DeepSeek 原位切换须传 legacyChannelId，旧渠道逐模型原子替换，目录始终公开。结果不明时先查阶段，勿换请求 ID 重试。", InputSchema: object(map[string]any{"modelId": stringField, "sourceChannelId": integerField, "legacyChannelId": integerField, "expectedCatalogRevision": integerField, "expectedGatewayRevision": stringField, "requestId": stringField}, "modelId", "sourceChannelId", "expectedCatalogRevision", "expectedGatewayRevision", "requestId")},
 			{Name: "model_publish.publish.status", Description: "只读查询模型分阶段公开状态，用于不确定结果恢复；不会再次调用网关。", InputSchema: object(map[string]any{"modelId": stringField}, "modelId")},
 			{Name: "model_publish.publish.resume", Description: "按原请求 ID 恢复未完成的分阶段上架；网关写入使用相同幂等键，绝不换请求 ID 盲重试。", InputSchema: object(map[string]any{"modelId": stringField, "requestId": stringField}, "modelId", "requestId")},
 		}

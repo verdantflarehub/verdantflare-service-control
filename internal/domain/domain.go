@@ -329,16 +329,20 @@ type ModelProbeReceipt struct {
 // supplier credentials. An unknown gateway outcome must be reconciled, never
 // submitted again under a new request ID.
 type ModelPublicationStage struct {
-	ModelID               string    `json:"modelId"`
-	RequestID             string    `json:"requestId"`
-	SourceChannelID       int       `json:"sourceChannelId"`
-	PublicChannelID       int       `json:"publicChannelId,omitempty"`
-	ProbeGatewayRevision  string    `json:"probeGatewayRevision"`
-	StagedGatewayRevision string    `json:"stagedGatewayRevision,omitempty"`
-	ActiveGatewayRevision string    `json:"activeGatewayRevision,omitempty"`
-	CatalogRevision       int       `json:"catalogRevision"`
-	Status                string    `json:"status"`
-	UpdatedAt             time.Time `json:"updatedAt"`
+	ModelID                 string    `json:"modelId"`
+	RequestID               string    `json:"requestId"`
+	SourceChannelID         int       `json:"sourceChannelId"`
+	LegacyChannelID         int       `json:"legacyChannelId,omitempty"`
+	PublicChannelID         int       `json:"publicChannelId,omitempty"`
+	ProbeGatewayRevision    string    `json:"probeGatewayRevision"`
+	StagedGatewayRevision   string    `json:"stagedGatewayRevision,omitempty"`
+	ActiveGatewayRevision   string    `json:"activeGatewayRevision,omitempty"`
+	RecoveryGatewayRevision string    `json:"recoveryGatewayRevision,omitempty"`
+	RecoveryRequestID       string    `json:"recoveryRequestId,omitempty"`
+	RecoveryAction          string    `json:"recoveryAction,omitempty"`
+	CatalogRevision         int       `json:"catalogRevision"`
+	Status                  string    `json:"status"`
+	UpdatedAt               time.Time `json:"updatedAt"`
 }
 
 type APITask struct {

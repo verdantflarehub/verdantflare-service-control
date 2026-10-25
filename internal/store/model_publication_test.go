@@ -39,3 +39,34 @@ func TestModelPublicationStageSurvivesAggregatePersistenceAndCAS(t *testing.T) {
 		t.Fatal("second publication replaced in-progress stage")
 	}
 }
+
+func TestModelPublicationCanRestartOnlyAfterTerminalRecovery(t *testing.T) {
+	ctx := context.Background()
+	for _, terminal := range []string{"aborted", "rolled_back"} {
+		memory := NewMemoryBootstrap()
+		first, err := memory.BeginModelPublication(ctx, domain.ModelPublicationStage{
+			ModelID: "deepseek-flash", RequestID: "legacy_publish_request_001", SourceChannelID: 7,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		first.Status = terminal
+		if _, err := memory.AdvanceModelPublication(ctx, first.ModelID, "staging", first); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := memory.BeginModelPublication(ctx, domain.ModelPublicationStage{
+			ModelID: first.ModelID, RequestID: first.RequestID,
+		}); err == nil {
+			t.Fatal("old request ID restarted a recovered publication")
+		}
+		next, err := memory.BeginModelPublication(ctx, domain.ModelPublicationStage{
+			ModelID: first.ModelID, RequestID: "legacy_publish_request_002", SourceChannelID: 8,
+		})
+		if err != nil || next.Status != "staging" || next.SourceChannelID != 8 {
+			t.Fatalf("restart: %+v, %v", next, err)
+		}
+		if _, err := memory.AdvanceModelPublication(ctx, first.ModelID, "staging", first); err == nil {
+			t.Fatal("old request changed the new publication")
+		}
+	}
+}

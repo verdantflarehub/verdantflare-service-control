@@ -162,7 +162,7 @@ func TestHubMCPModelTokenCannotUseAppTools(t *testing.T) {
 	if err := json.NewDecoder(listed.Body).Decode(&catalog); err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Result.Tools) != 23 {
+	if len(catalog.Result.Tools) != 27 {
 		t.Fatalf("model tools = %+v", catalog.Result.Tools)
 	}
 	for _, tool := range catalog.Result.Tools {

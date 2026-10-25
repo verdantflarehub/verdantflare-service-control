@@ -62,6 +62,43 @@ type ModelOpsChannelCreateResult struct {
 	Replayed  bool              `json:"replayed"`
 }
 
+type ModelOpsLegacyPrepareInput struct {
+	ModelID                 string `json:"modelId"`
+	LegacyChannelID         int    `json:"legacyChannelId"`
+	RequestID               string `json:"requestId"`
+	ExpectedGatewayRevision string `json:"expectedGatewayRevision"`
+}
+
+type ModelOpsLegacyPrepareResult struct {
+	ModelID         string            `json:"modelId"`
+	LegacyChannelID int               `json:"legacyChannelId"`
+	ChannelID       int               `json:"channelId"`
+	Revision        string            `json:"revision"`
+	Channels        []ModelOpsChannel `json:"channels"`
+	Replayed        bool              `json:"replayed"`
+}
+
+type ModelOpsLegacyRecoveryInput struct {
+	ModelID                 string `json:"modelId"`
+	LegacyChannelID         int    `json:"legacyChannelId"`
+	SourceChannelID         int    `json:"sourceChannelId"`
+	PublicChannelID         int    `json:"publicChannelId"`
+	Action                  string `json:"action"`
+	RequestID               string `json:"requestId"`
+	ExpectedGatewayRevision string `json:"expectedGatewayRevision"`
+}
+
+type ModelOpsLegacyRecoveryResult struct {
+	ModelID         string            `json:"modelId"`
+	LegacyChannelID int               `json:"legacyChannelId"`
+	SourceChannelID int               `json:"sourceChannelId"`
+	PublicChannelID int               `json:"publicChannelId"`
+	Action          string            `json:"action"`
+	Revision        string            `json:"revision"`
+	Channels        []ModelOpsChannel `json:"channels"`
+	Replayed        bool              `json:"replayed"`
+}
+
 type ModelOpsChannelUpdateInput struct {
 	ModelID                 string `json:"modelId"`
 	ChannelID               int    `json:"channelId"`
@@ -153,8 +190,30 @@ type ModelOpsPublicRouteInput struct {
 	ModelID                 string `json:"modelId"`
 	SourceChannelID         int    `json:"sourceChannelId"`
 	PublicChannelID         int    `json:"publicChannelId,omitempty"`
+	LegacyChannelID         int    `json:"legacyChannelId,omitempty"`
 	RequestID               string `json:"requestId"`
 	ExpectedGatewayRevision string `json:"expectedGatewayRevision"`
+}
+
+func (c *ModelOpsClient) PrepareLegacy(ctx context.Context, input ModelOpsLegacyPrepareInput) (ModelOpsLegacyPrepareResult, error) {
+	var result ModelOpsLegacyPrepareResult
+	err := c.post(ctx, "/channel/prepare-legacy", input, &result)
+	if err == nil && (result.ModelID != input.ModelID || result.LegacyChannelID != input.LegacyChannelID ||
+		result.ChannelID <= 0 || len(result.Revision) != 64 || len(result.Channels) < 2) {
+		err = errors.New("invalid legacy channel readback")
+	}
+	return result, err
+}
+
+func (c *ModelOpsClient) RecoverLegacy(ctx context.Context, input ModelOpsLegacyRecoveryInput) (ModelOpsLegacyRecoveryResult, error) {
+	var result ModelOpsLegacyRecoveryResult
+	err := c.post(ctx, "/channel/recover-legacy", input, &result)
+	if err == nil && (result.ModelID != input.ModelID || result.LegacyChannelID != input.LegacyChannelID ||
+		result.SourceChannelID != input.SourceChannelID || result.PublicChannelID != input.PublicChannelID ||
+		result.Action != input.Action || len(result.Revision) != 64 || len(result.Channels) == 0) {
+		err = errors.New("invalid legacy recovery readback")
+	}
+	return result, err
 }
 
 type ModelOpsPublicRouteResult struct {

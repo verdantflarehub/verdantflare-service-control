@@ -13,6 +13,7 @@ import (
 type PublishModelInput struct {
 	ModelID                 string `json:"modelId"`
 	SourceChannelID         int    `json:"sourceChannelId"`
+	LegacyChannelID         int    `json:"legacyChannelId,omitempty"`
 	ExpectedCatalogRevision int    `json:"expectedCatalogRevision"`
 	ExpectedGatewayRevision string `json:"expectedGatewayRevision"`
 	RequestID               string `json:"requestId"`
@@ -40,7 +41,8 @@ func (s *Service) PublishModel(ctx context.Context, subject string, input Publis
 	if err := validateModelOpsWrite(input.ModelID, input.RequestID, input.ExpectedGatewayRevision); err != nil {
 		return ModelPublicationResult{}, err
 	}
-	if input.SourceChannelID <= 0 || input.ExpectedCatalogRevision <= 0 {
+	if input.SourceChannelID <= 0 || input.ExpectedCatalogRevision <= 0 || input.LegacyChannelID < 0 ||
+		(input.LegacyChannelID > 0 && !legacyModelID(input.ModelID)) {
 		return ModelPublicationResult{}, domain.NewError(400, "MODEL_CONFIG_INVALID", "渠道或目录修订无效")
 	}
 	router, ok := s.modelOpsGateway.(modelPublicRouter)
@@ -61,7 +63,9 @@ func (s *Service) PublishModel(ctx context.Context, subject string, input Publis
 	if model.ID == "" {
 		return ModelPublicationResult{}, domain.NewError(404, "MODEL_NOT_FOUND", "模型草稿不存在")
 	}
-	if model.PublicVisible || model.ExperienceMode != "" || model.Revision != input.ExpectedCatalogRevision {
+	if model.Revision != input.ExpectedCatalogRevision ||
+		(input.LegacyChannelID == 0 && (model.PublicVisible || model.ExperienceMode != "")) ||
+		(input.LegacyChannelID > 0 && !model.PublicVisible) {
 		return ModelPublicationResult{}, domain.NewError(409, "MODEL_CATALOG_CHANGED", "模型目录状态或修订已变化")
 	}
 	if err := validatePublicModel(model); err != nil {
@@ -76,6 +80,18 @@ func (s *Service) PublishModel(ctx context.Context, subject string, input Publis
 	}
 	if snapshot.Revision != input.ExpectedGatewayRevision {
 		return ModelPublicationResult{}, domain.NewError(409, "MODEL_CONFIG_CHANGED", "网关修订已变化")
+	}
+	if input.LegacyChannelID > 0 {
+		legacyFound := false
+		for _, channel := range snapshot.Channels {
+			if channel.ID == input.LegacyChannelID && channel.Status == 1 && channel.Type == 43 &&
+				len(channel.Groups) == 1 && channel.Groups[0] == "default" && channel.CredentialConfigured {
+				legacyFound = true
+			}
+		}
+		if !legacyFound {
+			return ModelPublicationResult{}, domain.NewError(409, "MODEL_LEGACY_CHANNEL_CHANGED", "旧共享渠道已变化")
+		}
 	}
 	var source *gateway.ModelOpsChannel
 	for i := range snapshot.Channels {
@@ -93,6 +109,16 @@ func (s *Service) PublishModel(ctx context.Context, subject string, input Publis
 	}
 	priced := (snapshot.Pricing.BillingMode == "tiered_expr" && strings.TrimSpace(snapshot.Pricing.BillingExpr) != "") ||
 		(snapshot.Pricing.BillingMode == "ratio" && snapshot.Pricing.ModelPrice != nil && *snapshot.Pricing.ModelPrice > 0)
+	if input.LegacyChannelID > 0 && snapshot.Pricing.BillingMode == "ratio" && snapshot.Pricing.ModelRatio != nil && *snapshot.Pricing.ModelRatio > 0 {
+		priced = true
+	}
+	if input.LegacyChannelID > 0 {
+		priced = priced && ((input.ModelID == "deepseek-flash" && snapshot.Pricing.BillingMode == "ratio" &&
+			snapshot.Pricing.ModelPrice == nil && snapshot.Pricing.ModelRatio != nil && *snapshot.Pricing.ModelRatio == 0.75 &&
+			(snapshot.Pricing.CompletionRatio == nil || *snapshot.Pricing.CompletionRatio == 1)) ||
+			(input.ModelID == "deepseek-v4-pro" && snapshot.Pricing.BillingMode == "tiered_expr" &&
+				snapshot.Pricing.ModelPrice == nil && snapshot.Pricing.BillingExpr == legacyV4ProBillingExpr))
+	}
 	if !priced {
 		return ModelPublicationResult{}, domain.NewError(409, "MODEL_BILLING_NOT_READY", "网关计费未就绪")
 	}
@@ -101,6 +127,7 @@ func (s *Service) PublishModel(ctx context.Context, subject string, input Publis
 		return ModelPublicationResult{}, domain.NewError(409, "MODEL_PROBE_REQUIRED", "当前网关修订缺少真实结算探针")
 	}
 	stage := domain.ModelPublicationStage{ModelID: input.ModelID, RequestID: input.RequestID, SourceChannelID: input.SourceChannelID,
+		LegacyChannelID:      input.LegacyChannelID,
 		ProbeGatewayRevision: snapshot.Revision, CatalogRevision: model.Revision}
 	stage, err = s.repository.BeginModelPublication(ctx, stage)
 	if err != nil {
@@ -136,7 +163,8 @@ func (s *Service) resumeModelPublication(ctx context.Context, router modelPublic
 		// Reuse the original idempotency key. If the first gateway write succeeded
 		// but Control lost the response, this returns the same disabled route.
 		staged, err := router.StagePublicRoute(ctx, gateway.ModelOpsPublicRouteInput{ModelID: modelID,
-			SourceChannelID: stage.SourceChannelID, RequestID: stage.RequestID, ExpectedGatewayRevision: stage.ProbeGatewayRevision})
+			SourceChannelID: stage.SourceChannelID, LegacyChannelID: stage.LegacyChannelID,
+			RequestID: stage.RequestID, ExpectedGatewayRevision: stage.ProbeGatewayRevision})
 		if err != nil {
 			return ModelPublicationResult{}, domain.NewError(503, "MODEL_PUBLICATION_OUTCOME_UNKNOWN", "路由预备结果待核对；保留原请求 ID 后恢复")
 		}
@@ -170,7 +198,9 @@ func (s *Service) resumeModelPublication(ctx context.Context, router modelPublic
 		if current.ID == "" {
 			return ModelPublicationResult{}, domain.NewError(404, "MODEL_NOT_FOUND", "模型草稿不存在")
 		}
-		if current.PublicVisible && current.Revision == stage.CatalogRevision+1 {
+		if stage.LegacyChannelID > 0 && current.PublicVisible && current.Revision == stage.CatalogRevision {
+			// An in-place migration must not hide the existing public directory.
+		} else if current.PublicVisible && current.Revision == stage.CatalogRevision+1 {
 			stage.CatalogRevision = current.Revision
 		} else if !current.PublicVisible && current.Revision == stage.CatalogRevision {
 			current.PublicVisible = true
@@ -209,7 +239,8 @@ func (s *Service) resumeModelPublication(ctx context.Context, router modelPublic
 			digest := sha256.Sum256([]byte(stage.RequestID + "\x00activate"))
 			activated, err := router.ActivatePublicRoute(ctx, gateway.ModelOpsPublicRouteInput{ModelID: modelID,
 				SourceChannelID: stage.SourceChannelID, PublicChannelID: stage.PublicChannelID,
-				RequestID: hex.EncodeToString(digest[:]), ExpectedGatewayRevision: stage.StagedGatewayRevision})
+				LegacyChannelID: stage.LegacyChannelID,
+				RequestID:       hex.EncodeToString(digest[:]), ExpectedGatewayRevision: stage.StagedGatewayRevision})
 			if err != nil {
 				return ModelPublicationResult{}, domain.NewError(503, "MODEL_PUBLICATION_OUTCOME_UNKNOWN", "路由启用结果待核对；保留原请求 ID 后恢复")
 			}
@@ -221,7 +252,8 @@ func (s *Service) resumeModelPublication(ctx context.Context, router modelPublic
 				return ModelPublicationResult{}, domain.NewError(409, "MODEL_CONFIG_CHANGED", "启用后网关修订已变化")
 			}
 		}
-		if snapshot.Revision == stage.StagedGatewayRevision || !publicRouteMatches(snapshot.Channels, stage.SourceChannelID, stage.PublicChannelID, true) {
+		if snapshot.Revision == stage.StagedGatewayRevision || !publicRouteMatches(snapshot.Channels, stage.SourceChannelID, stage.PublicChannelID, true) ||
+			!legacyChannelRemoved(snapshot.Channels, stage.LegacyChannelID) {
 			return ModelPublicationResult{}, domain.NewError(409, "MODEL_PUBLICATION_READBACK_FAILED", "公开路由状态回读不一致")
 		}
 		stage.ActiveGatewayRevision, stage.Status = snapshot.Revision, "active"
@@ -234,7 +266,8 @@ func (s *Service) resumeModelPublication(ctx context.Context, router modelPublic
 		if err != nil {
 			return ModelPublicationResult{}, modelOpsGatewayError(err)
 		}
-		if snapshot.Revision != stage.ActiveGatewayRevision || !publicRouteMatches(snapshot.Channels, stage.SourceChannelID, stage.PublicChannelID, true) {
+		if snapshot.Revision != stage.ActiveGatewayRevision || !publicRouteMatches(snapshot.Channels, stage.SourceChannelID, stage.PublicChannelID, true) ||
+			!legacyChannelRemoved(snapshot.Channels, stage.LegacyChannelID) {
 			return ModelPublicationResult{}, domain.NewError(409, "MODEL_PUBLICATION_READBACK_FAILED", "公开路由已变化")
 		}
 		available, err := s.gatewayModels(ctx)
@@ -267,6 +300,18 @@ func (s *Service) resumeModelPublication(ctx context.Context, router modelPublic
 	}
 	return ModelPublicationResult{ModelID: modelID, CatalogRevision: stage.CatalogRevision,
 		GatewayRevision: stage.ActiveGatewayRevision, PublicChannelID: stage.PublicChannelID, Status: stage.Status}, nil
+}
+
+func legacyChannelRemoved(channels []gateway.ModelOpsChannel, legacyID int) bool {
+	if legacyID == 0 {
+		return true
+	}
+	for _, channel := range channels {
+		if channel.ID == legacyID {
+			return false
+		}
+	}
+	return true
 }
 
 func publicRouteMatches(channels []gateway.ModelOpsChannel, sourceID, publicID int, active bool) bool {
