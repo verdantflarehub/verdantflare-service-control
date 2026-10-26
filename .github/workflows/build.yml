@@ -1,5 +1,5 @@
 # ADMIN CONFIG REQUIRED:
-# Configure the repository secrets documented in the deployment README and create/protect the release branch.
+# Configure the KUBERNETES_* repository secrets documented in the deployment README and create/protect the release branch.
 name: build
 
 on:
@@ -10,8 +10,10 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 env:
+  IMAGE_NAME: ghcr.io/verdantflarehub/verdantflare-service-control
   VERSION: ${{ github.ref == 'refs/heads/dev' && 'service-control-v1.7.21-dev.1' || 'service-control-v1.7.21' }}
 
 concurrency:
@@ -30,32 +32,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Set image metadata
-        id: image
-        env:
-          REGISTRY_ENDPOINT: ${{ secrets.REGISTRY_ENDPOINT_ALIYUN }}
-        run: |
-          registry_endpoint="${REGISTRY_ENDPOINT%/}"
-
-          if [ -z "$registry_endpoint" ]; then
-            echo "REGISTRY_ENDPOINT_ALIYUN is required" >&2
-            exit 1
-          fi
-
-          echo "registry_endpoint=$registry_endpoint" >> "$GITHUB_OUTPUT"
-          echo "image_name=$registry_endpoint/wod/verdantflare" >> "$GITHUB_OUTPUT"
-
-      - name: Login to Aliyun Container Registry
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ steps.image.outputs.registry_endpoint }}
-          username: ${{ secrets.REGISTRY_USER_ALIYUN }}
-          password: ${{ secrets.REGISTRY_PASSWORD_ALIYUN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Refuse an existing image tag
-        run: '! docker buildx imagetools inspect "${{ steps.image.outputs.image_name }}:${{ env.VERSION }}" >/dev/null 2>&1'
+        run: '! docker buildx imagetools inspect "${{ env.IMAGE_NAME }}:${{ env.VERSION }}" >/dev/null 2>&1'
 
-      - name: Build image
+      - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -64,12 +51,12 @@ jobs:
           push: true
           provenance: false
           sbom: false
-          tags: ${{ steps.image.outputs.image_name }}:${{ env.VERSION }}
+          tags: ${{ env.IMAGE_NAME }}:${{ env.VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Image push success
-        run: echo "${{ steps.image.outputs.image_name }}:${{ env.VERSION }} built and pushed successfully!"
+        run: echo "${{ env.IMAGE_NAME }}:${{ env.VERSION }} built and pushed successfully!"
 
   deploy:
     name: Deploy Service Control to Kubernetes
@@ -100,8 +87,7 @@ jobs:
               --embed-certs=true
           else
             kubectl config set-cluster verdantflare \
-              --server="$KUBERNETES_SERVER" \
-              --insecure-skip-tls-verify=true
+              --server="$KUBERNETES_SERVER"
           fi
 
           kubectl config set-credentials github-actions --token="$KUBERNETES_TOKEN"
@@ -110,15 +96,26 @@ jobs:
             --user=github-actions \
             --namespace=verdantflare
 
-      - name: Update Service Control deployment
+      - name: Configure GHCR pull secret and update Service Control deployment
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
+          kubectl --context verdantflare -n verdantflare create secret docker-registry ghcr-pull \
+            --docker-server=ghcr.io \
+            --docker-username="$GHCR_USER" \
+            --docker-password="$GHCR_TOKEN" \
+            --dry-run=client -o yaml | kubectl --context verdantflare -n verdantflare apply -f -
+          kubectl --context verdantflare -n verdantflare patch serviceaccount default \
+            -p '{"imagePullSecrets":[{"name":"ghcr-pull"}]}'
+
           kubectl --context verdantflare -n verdantflare get secret login-directory-bridge -o json \
             | jq -e '(.data.TOKEN // "") != ""' >/dev/null
           kubectl --context verdantflare -n verdantflare patch deployment verdantflare-service-control --type strategic \
-            -p '{"spec":{"template":{"spec":{"containers":[{"name":"verdantflare-service-control","env":[{"name":"CONTROL_ALLOWED_ORIGINS","value":"https://hub.verdantflarehub.com,https://hub.verdantflare.ai"},{"name":"CONTROL_CHART_REGISTRY_HOST","value":"registry.verdantflare.ai"},{"name":"CONTROL_CHART_REGISTRY_INTERNAL_URL","value":"http://registry.verdantflare.svc.cluster.local:8080"},{"name":"CONTROL_LOGIN_DIRECTORY_BASE_URL","value":"http://verdantflare-login-api.verdantflare.svc.cluster.local:8088"},{"name":"CONTROL_LOGIN_DIRECTORY_TOKEN","valueFrom":{"secretKeyRef":{"name":"login-directory-bridge","key":"TOKEN"}}}]}]}}}}'
+            -p '{"spec":{"template":{"spec":{"containers":[{"name":"verdantflare-service-control","env":[{"name":"CONTROL_ALLOWED_ORIGINS","value":"https://hub.verdantflare.ai"},{"name":"CONTROL_CHART_REGISTRY_HOST","value":"registry.verdantflare.ai"},{"name":"CONTROL_CHART_REGISTRY_INTERNAL_URL","value":"http://registry.verdantflare.svc.cluster.local:8080"},{"name":"CONTROL_LOGIN_DIRECTORY_BASE_URL","value":"http://verdantflare-login-api.verdantflare.svc.cluster.local:8088"},{"name":"CONTROL_LOGIN_DIRECTORY_TOKEN","valueFrom":{"secretKeyRef":{"name":"login-directory-bridge","key":"TOKEN"}}}]}]}}}}'
           kubectl --context verdantflare -n verdantflare rollout status deployment/verdantflare-service-control --timeout=5m
-          image="registry.cn-qingdao.aliyuncs.com/wod/verdantflare:${VERSION}"
+          image="${IMAGE_NAME}:${VERSION}"
           kubectl --context verdantflare -n verdantflare set image deployment/verdantflare-service-control verdantflare-service-control="$image"
           kubectl --context verdantflare -n verdantflare rollout status deployment/verdantflare-service-control --timeout=5m
           kubectl --context verdantflare -n verdantflare get deployment/verdantflare-service-control -o jsonpath='{.spec.template.spec.containers[?(@.name=="verdantflare-service-control")].image}{"\n"}'
