@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -72,16 +73,20 @@ func (p *Postgres) UpdateSurveyGuest(ctx context.Context, key string, update fun
 			return true, err
 		}
 	}
+	beforeRaw, err := json.Marshal(guest)
+	if err != nil {
+		return true, err
+	}
 	updated, err := update(state.Settings, guest, exists)
 	if err != nil {
 		return true, err
 	}
-	if !exists || reflect.DeepEqual(guest, updated) {
-		return true, tx.Commit()
-	}
 	raw, err := json.Marshal(updated)
 	if err != nil {
 		return true, err
+	}
+	if !exists || bytes.Equal(beforeRaw, raw) {
+		return true, tx.Commit()
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE control_survey_entry SET payload=$1,payload_bytes=$2 WHERE survey_id=$3 AND kind='guest' AND entry_key=$4`, raw, len(raw), id, key); err != nil {
 		return true, err
