@@ -4,6 +4,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -47,7 +50,27 @@ func main() {
 	if err != nil {
 		fail("read storage version: %v", err)
 	}
-	fmt.Printf("survey storage version: %d\n", version)
+	state, err := repo.ReadSurvey(store.WithSurveyID(ctx, *survey))
+	if err != nil {
+		fail("read survey state: %v", err)
+	}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		fail("encode survey state: %v", err)
+	}
+	digest := sha256.Sum256(raw)
+	summary := struct {
+		Survey          string `json:"survey"`
+		StorageVersion  int    `json:"storageVersion"`
+		Open            bool   `json:"open"`
+		SettingsVersion int    `json:"settingsVersion"`
+		Guests          int    `json:"guests"`
+		Responses       int    `json:"responses"`
+		StateSHA256     string `json:"stateSHA256"`
+	}{*survey, version, state.Settings.Open, state.Settings.Version, len(state.Guests), len(state.Responses), hex.EncodeToString(digest[:])}
+	if err := json.NewEncoder(os.Stdout).Encode(summary); err != nil {
+		fail("write survey summary: %v", err)
+	}
 }
 
 func fail(format string, args ...any) {

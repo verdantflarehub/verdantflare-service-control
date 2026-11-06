@@ -14,7 +14,7 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/verdantflarehub/verdantflare-service-control
-  VERSION: ${{ github.ref == 'refs/heads/dev' && 'service-control-v1.7.21-dev.1' || 'service-control-v1.7.21' }}
+  VERSION: ${{ github.ref == 'refs/heads/dev' && 'service-control-v1.7.22-dev.1' || 'service-control-v1.7.22' }}
 
 concurrency:
   group: verdantflare-service-control-release
@@ -65,6 +65,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout migration
+        uses: actions/checkout@v4
+
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
 
@@ -77,6 +80,10 @@ jobs:
           set -eu
           test -n "$KUBERNETES_SERVER"
           test -n "$KUBERNETES_TOKEN"
+          if [ "$KUBERNETES_SERVER" != 'https://kubernetes.verdantflare.ai' ]; then
+            echo 'Refusing to deploy: Kubernetes API is not the current Center production endpoint' >&2
+            exit 1
+          fi
 
           if [ -n "$KUBERNETES_CA" ]; then
             ca_file="$RUNNER_TEMP/kubernetes-ca.crt"
@@ -95,6 +102,32 @@ jobs:
             --cluster=verdantflare \
             --user=github-actions \
             --namespace=verdantflare
+
+      - name: Back up Control database and apply additive survey migration
+        run: |
+          set -eu
+          current="$(kubectl --context verdantflare -n verdantflare get deployment verdantflare-service-control -o jsonpath='{.spec.template.spec.containers[?(@.name=="verdantflare-service-control")].image}')"
+          test "$current" = 'ghcr.io/verdantflarehub/verdantflare-service-control:service-control-v1.7.21'
+          kubectl --context verdantflare -n verdantflare rollout status deployment/postgres --timeout=2m
+          pod="$(kubectl --context verdantflare -n verdantflare get pods -l app=postgres,owner=sc -o jsonpath='{.items[0].metadata.name}')"
+          test -n "$pod"
+          kubectl --context verdantflare -n verdantflare exec "$pod" -c postgres -- sh -ec '
+            umask 077
+            backup_dir=/var/lib/postgresql/data/backups
+            mkdir -p "$backup_dir"
+            backup_file="$backup_dir/control-survey-$(date -u +%Y%m%dT%H%M%SZ).dump"
+            pg_dump -Fc -U "$POSTGRES_USER" -d control -f "$backup_file"
+            test -s "$backup_file"
+            pg_restore -l "$backup_file" >/dev/null
+            echo "Control database backup verified on PostgreSQL PVC"
+          '
+          kubectl --context verdantflare -n verdantflare exec -i "$pod" -c postgres -- \
+            sh -ec 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d control' \
+            < migrations/postgres/007_survey_rows.sql
+          printf "SELECT storage_version FROM control_survey_state WHERE survey_id='yunnan-202610';\n" \
+            | kubectl --context verdantflare -n verdantflare exec -i "$pod" -c postgres -- \
+              sh -ec 'psql -XAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d control' \
+            | grep -Eq '^[12]$'
 
       - name: Configure GHCR pull secret and update Service Control deployment
         env:
@@ -119,3 +152,16 @@ jobs:
           kubectl --context verdantflare -n verdantflare set image deployment/verdantflare-service-control verdantflare-service-control="$image"
           kubectl --context verdantflare -n verdantflare rollout status deployment/verdantflare-service-control --timeout=5m
           kubectl --context verdantflare -n verdantflare get deployment/verdantflare-service-control -o jsonpath='{.spec.template.spec.containers[?(@.name=="verdantflare-service-control")].image}{"\n"}'
+
+      - name: Verify survey preservation and cut over rows
+        run: |
+          set -eu
+          target=deployment/verdantflare-service-control
+          before="$(kubectl --context verdantflare -n verdantflare exec "$target" -c verdantflare-service-control -- /survey-storage -action status -survey yunnan-202610)"
+          echo "$before" | jq -e '.open == true and (.storageVersion == 1 or .storageVersion == 2)' >/dev/null
+          kubectl --context verdantflare -n verdantflare exec "$target" -c verdantflare-service-control -- \
+            /survey-storage -action cutover -survey yunnan-202610
+          after="$(kubectl --context verdantflare -n verdantflare exec "$target" -c verdantflare-service-control -- /survey-storage -action status -survey yunnan-202610)"
+          jq -en --argjson before "$before" --argjson after "$after" \
+            '$after.storageVersion == 2 and $after.open == $before.open and $after.settingsVersion == $before.settingsVersion' >/dev/null
+          printf 'Before cutover: %s\nAfter cutover: %s\n' "$before" "$after"
