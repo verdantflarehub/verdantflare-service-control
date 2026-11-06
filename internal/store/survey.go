@@ -46,19 +46,23 @@ func copySurvey(state domain.SurveyState) (domain.SurveyState, error) {
 	if err = json.Unmarshal(raw, &result); err != nil {
 		return result, err
 	}
-	if result.Challenges == nil {
-		result.Challenges = map[string]domain.SurveyChallenge{}
-	}
-	if result.Guests == nil {
-		result.Guests = map[string]domain.SurveyGuest{}
-	}
-	if result.Rates == nil {
-		result.Rates = map[string]domain.SurveyRate{}
-	}
-	if result.Responses == nil {
-		result.Responses = map[string]domain.SurveyResponse{}
-	}
+	initializeSurveyMaps(&result)
 	return result, nil
+}
+
+func initializeSurveyMaps(state *domain.SurveyState) {
+	if state.Challenges == nil {
+		state.Challenges = map[string]domain.SurveyChallenge{}
+	}
+	if state.Guests == nil {
+		state.Guests = map[string]domain.SurveyGuest{}
+	}
+	if state.Rates == nil {
+		state.Rates = map[string]domain.SurveyRate{}
+	}
+	if state.Responses == nil {
+		state.Responses = map[string]domain.SurveyResponse{}
+	}
 }
 func (m *Memory) ReadSurvey(ctx context.Context) (domain.SurveyState, error) {
 	m.mu.RLock()
@@ -131,7 +135,8 @@ func (p *Postgres) ReadSurvey(ctx context.Context) (domain.SurveyState, error) {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		return state, err
 	}
-	return copySurvey(state)
+	initializeSurveyMaps(&state)
+	return state, nil
 }
 func (p *Postgres) UpdateSurvey(ctx context.Context, update func(*domain.SurveyState) error) error {
 	tx, err := p.db.BeginTx(ctx, nil)
@@ -150,10 +155,7 @@ func (p *Postgres) UpdateSurvey(ctx context.Context, update func(*domain.SurveyS
 	if err = json.Unmarshal(raw, &state); err != nil {
 		return err
 	}
-	state, err = copySurvey(state)
-	if err != nil {
-		return err
-	}
+	initializeSurveyMaps(&state)
 	if err = update(&state); err != nil {
 		return err
 	}

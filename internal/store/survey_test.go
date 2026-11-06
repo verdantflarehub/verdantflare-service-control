@@ -53,3 +53,26 @@ func TestSurveySnapshotAndRollback(t *testing.T) {
 		t.Fatal("survey must stay separate from the core aggregate")
 	}
 }
+
+func TestSurveyLegacyEmptyStateCanBeUpdated(t *testing.T) {
+	var state domain.SurveyState
+	if err := json.Unmarshal([]byte(`{}`), &state); err != nil {
+		t.Fatal(err)
+	}
+	initializeSurveyMaps(&state)
+	state.Guests["guest"] = domain.SurveyGuest{Nickname: "访客"}
+	state.Responses["response"] = domain.SurveyResponse{ID: "response"}
+	state.Challenges["challenge"] = domain.SurveyChallenge{}
+	state.Rates["source"] = domain.SurveyRate{}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored domain.SurveyState
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored.Guests["guest"].Nickname != "访客" || restored.Responses["response"].ID != "response" || len(restored.Challenges) != 1 || len(restored.Rates) != 1 {
+		t.Fatal("empty legacy state did not retain a survey update")
+	}
+}
