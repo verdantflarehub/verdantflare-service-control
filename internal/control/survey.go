@@ -22,8 +22,6 @@ import (
 
 	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/store"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/unicode/norm"
 )
 
 func surveyHash(value string) string {
@@ -313,7 +311,7 @@ type SurveySessionCredentials struct {
 }
 
 func surveyNicknameKey(value string) string {
-	return cases.Fold().String(norm.NFKC.String(strings.TrimSpace(value)))
+	return domain.SurveyNicknameKey(value)
 }
 
 func (s *Service) StartSurveySession(ctx context.Context, source string, input SurveySessionInput) (SurveySessionCredentials, error) {
@@ -519,6 +517,36 @@ func (s *Service) SaveSurveyDraft(ctx context.Context, token string, input domai
 		return nil, err
 	}
 	var savedAt *time.Time
+	if fast, ok := repo.(store.SurveyGuestUpdater); ok {
+		handled, err := fast.UpdateSurveyGuest(ctx, surveyHash(token), func(settings domain.SurveySettings, guest domain.SurveyGuest, exists bool) (domain.SurveyGuest, error) {
+			if err := requireSurveyOpen(domain.SurveyState{Settings: settings}); err != nil {
+				return guest, err
+			}
+			if !exists || len(token) != 64 || !s.now().Before(guest.ExpiresAt) {
+				return guest, domain.NewError(401, "survey_session_required", "填写会话已过期，请重新输入昵称和验证码；页面中的答案会保留")
+			}
+			if guest.ResponseID != "" {
+				return guest, domain.NewError(409, "survey_already_submitted", "问卷已提交，不能再保存草稿")
+			}
+			if revision <= guest.DraftRevision {
+				savedAt = guest.DraftSavedAt
+				return guest, nil
+			}
+			guest.DraftRevision = revision
+			if input.Analysis == "no" {
+				guest.Draft, guest.DraftSavedAt, guest.DraftStep = nil, nil, 0
+			} else {
+				now := s.now()
+				guest.Draft, guest.DraftSavedAt = &input, &now
+				guest.DraftStep = step
+				savedAt = &now
+			}
+			return guest, nil
+		})
+		if handled || err != nil {
+			return savedAt, err
+		}
+	}
 	err = repo.UpdateSurvey(ctx, func(state *domain.SurveyState) error {
 		if err := requireSurveyOpen(*state); err != nil {
 			return err

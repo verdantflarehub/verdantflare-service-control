@@ -124,8 +124,14 @@ func (m *Memory) CreateSurvey(_ context.Context, meta domain.SurveyMetadata) (do
 	return meta, nil
 }
 func (p *Postgres) ReadSurvey(ctx context.Context) (domain.SurveyState, error) {
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return domain.SurveyState{}, err
+	}
+	defer tx.Rollback()
 	var raw []byte
-	if err := p.db.QueryRowContext(ctx, `SELECT state FROM control_survey_state WHERE survey_id=$1`, SurveyID(ctx)).Scan(&raw); err != nil {
+	var version int
+	if err := tx.QueryRowContext(ctx, `SELECT state,storage_version FROM control_survey_state WHERE survey_id=$1`, SurveyID(ctx)).Scan(&raw, &version); err != nil {
 		if err == sql.ErrNoRows {
 			return domain.SurveyState{}, surveyMissing()
 		}
@@ -136,6 +142,16 @@ func (p *Postgres) ReadSurvey(ctx context.Context) (domain.SurveyState, error) {
 		return state, err
 	}
 	initializeSurveyMaps(&state)
+	if version == 2 {
+		if err := loadSurveyRows(ctx, tx, SurveyID(ctx), &state); err != nil {
+			return state, err
+		}
+	} else if version != 1 {
+		return state, fmt.Errorf("unsupported survey storage version %d", version)
+	}
+	if err := tx.Commit(); err != nil {
+		return state, err
+	}
 	return state, nil
 }
 func (p *Postgres) UpdateSurvey(ctx context.Context, update func(*domain.SurveyState) error) error {
@@ -145,7 +161,8 @@ func (p *Postgres) UpdateSurvey(ctx context.Context, update func(*domain.SurveyS
 	}
 	defer tx.Rollback()
 	var raw []byte
-	if err = tx.QueryRowContext(ctx, `SELECT state FROM control_survey_state WHERE survey_id=$1 FOR UPDATE`, SurveyID(ctx)).Scan(&raw); err != nil {
+	var version int
+	if err = tx.QueryRowContext(ctx, `SELECT state,storage_version FROM control_survey_state WHERE survey_id=$1 FOR UPDATE`, SurveyID(ctx)).Scan(&raw, &version); err != nil {
 		if err == sql.ErrNoRows {
 			return surveyMissing()
 		}
@@ -156,6 +173,22 @@ func (p *Postgres) UpdateSurvey(ctx context.Context, update func(*domain.SurveyS
 		return err
 	}
 	initializeSurveyMaps(&state)
+	if version == 2 {
+		if err = loadSurveyRows(ctx, tx, SurveyID(ctx), &state); err != nil {
+			return err
+		}
+		before := snapshotSurveyRows(state)
+		if err = update(&state); err != nil {
+			return err
+		}
+		if err = persistSurveyRows(ctx, tx, SurveyID(ctx), before, state); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+	if version != 1 {
+		return fmt.Errorf("unsupported survey storage version %d", version)
+	}
 	if err = update(&state); err != nil {
 		return err
 	}
@@ -172,27 +205,35 @@ func (p *Postgres) UpdateSurvey(ctx context.Context, update func(*domain.SurveyS
 	return tx.Commit()
 }
 func (p *Postgres) ListSurveys(ctx context.Context) ([]domain.SurveyState, error) {
-	rows, err := p.db.QueryContext(ctx, `SELECT survey_id, state FROM control_survey_state ORDER BY survey_id LIMIT 101`)
+	rows, err := p.db.QueryContext(ctx, `SELECT survey_id FROM control_survey_state ORDER BY survey_id LIMIT 101`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	result := []domain.SurveyState{}
+	ids := []string{}
 	for rows.Next() {
 		var id string
-		var raw []byte
-		if err = rows.Scan(&id, &raw); err != nil {
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		var state domain.SurveyState
-		if err = json.Unmarshal(raw, &state); err != nil {
+		ids = append(ids, id)
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	result := make([]domain.SurveyState, 0, len(ids))
+	for _, id := range ids {
+		state, err := p.ReadSurvey(WithSurveyID(ctx, id))
+		if err != nil {
 			return nil, err
 		}
 		meta := surveyMetadata(id, state)
 		state.Metadata = &meta
 		result = append(result, state)
 	}
-	return result, rows.Err()
+	return result, nil
 }
 func (p *Postgres) CreateSurvey(ctx context.Context, meta domain.SurveyMetadata) (domain.SurveyMetadata, error) {
 	state, err := json.Marshal(domain.SurveyState{Metadata: &meta})

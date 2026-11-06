@@ -1,8 +1,18 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
+)
 
 const SurveyID = "yunnan-202610"
+
+func SurveyNicknameKey(value string) string {
+	return cases.Fold().String(norm.NFKC.String(strings.TrimSpace(value)))
+}
 
 type SurveyQuestion struct {
 	ID      string   `json:"id"`
