@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -19,6 +20,7 @@ type Postgres struct {
 }
 
 type persistedState struct {
+	IdentityRevision   uint64                                  `json:"assistantIdentityRevision,string,omitempty"`
 	Users              map[string]domain.CenterUser            `json:"users"`
 	Organizations      map[string]domain.Organization          `json:"organizations"`
 	Apps               map[string]domain.App                   `json:"apps"`
@@ -109,8 +111,22 @@ func (p *Postgres) mutate(ctx context.Context, operation func(*Memory) error) er
 	if err != nil {
 		return err
 	}
+	beforeIdentity, err := authorizationFingerprint(memory)
+	if err != nil {
+		return err
+	}
 	if err := operation(memory); err != nil {
 		return err
+	}
+	afterIdentity, err := authorizationFingerprint(memory)
+	if err != nil {
+		return err
+	}
+	if beforeIdentity != afterIdentity && memory.identityRevision != 0 {
+		if memory.identityRevision == math.MaxUint64 {
+			return identityUnavailable()
+		}
+		memory.identityRevision++
 	}
 	updated, err := encodeMemory(memory)
 	if err != nil {
@@ -137,7 +153,8 @@ func encodeMemory(m *Memory) ([]byte, error) {
 		tokens[id] = persistedMCPToken{MCPToken: token, LoginSubject: token.LoginSubject, SecretHash: token.SecretHash}
 	}
 	raw, err := json.Marshal(persistedState{
-		Users: m.users, Organizations: m.organizations, Apps: m.apps, AppVersions: m.appVersions, StationGrants: m.stationGrants, Entitlements: m.entitlements,
+		IdentityRevision: m.identityRevision,
+		Users:            m.users, Organizations: m.organizations, Apps: m.apps, AppVersions: m.appVersions, StationGrants: m.stationGrants, Entitlements: m.entitlements,
 		Sessions: m.sessions, ModelRuns: m.modelRuns, APIKeys: keys, MCPTokens: tokens, Models: m.models, PublicModels: m.publicModels, ModelIcons: m.modelIcons, Tasks: m.tasks,
 		CredentialTickets:  m.credentialTickets,
 		ModelProbeReceipts: m.modelProbeReceipts,
@@ -171,7 +188,8 @@ func decodeMemory(raw []byte) (*Memory, error) {
 		tokens[id] = token
 	}
 	return &Memory{
-		users: state.Users, organizations: state.Organizations, apps: state.Apps, appVersions: state.AppVersions, stationGrants: state.StationGrants,
+		identityRevision: state.IdentityRevision,
+		users:            state.Users, organizations: state.Organizations, apps: state.Apps, appVersions: state.AppVersions, stationGrants: state.StationGrants,
 		entitlements: state.Entitlements, sessions: state.Sessions, modelRuns: state.ModelRuns, apiKeys: keys, mcpTokens: tokens,
 		credentialTickets:  state.CredentialTickets,
 		modelProbeReceipts: state.ModelProbeReceipts,

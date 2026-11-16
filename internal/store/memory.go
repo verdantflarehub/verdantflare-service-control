@@ -14,8 +14,9 @@ import (
 )
 
 type Memory struct {
-	mu      sync.RWMutex
-	surveys map[string]domain.SurveyState
+	mu               sync.RWMutex
+	identityRevision uint64
+	surveys          map[string]domain.SurveyState
 
 	users              map[string]domain.CenterUser
 	organizations      map[string]domain.Organization

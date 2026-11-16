@@ -10,6 +10,7 @@ import (
 )
 
 type Config struct {
+	AssistantMTLS               AssistantMTLS
 	Environment                 string
 	Address                     string
 	DatabaseURL                 string
@@ -119,7 +120,12 @@ func Load() (Config, error) {
 		}
 	}
 
+	assistantMTLS, err := loadAssistantMTLS(env("CONTROL_ADDRESS", ":8080"), stationAddress, databaseURL)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
+		AssistantMTLS:               assistantMTLS,
 		Environment:                 environment,
 		Address:                     env("CONTROL_ADDRESS", ":8080"),
 		DatabaseURL:                 databaseURL,

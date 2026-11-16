@@ -155,7 +155,45 @@ func main() {
 		}
 	}
 
-	serverErrors := make(chan error, 2)
+	var assistantServer *http.Server
+	if configuration.AssistantMTLS.Address != "" {
+		persistent, ok := repository.(*store.Postgres)
+		if !ok {
+			logger.Error("assistant identity requires persistent repository")
+			os.Exit(1)
+		}
+		readyContext, cancelReady := context.WithTimeout(context.Background(), 5*time.Second)
+		readyErr := persistent.AssistantIdentityReady(readyContext)
+		cancelReady()
+		if readyErr != nil {
+			logger.Error("assistant identity revision must be initialized before enablement")
+			os.Exit(1)
+		}
+		cfg := configuration.AssistantMTLS
+		caPEM, err := os.ReadFile(cfg.CAFile)
+		if err != nil {
+			logger.Error("assistant CA unreadable")
+			os.Exit(1)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			logger.Error("assistant CA invalid")
+			os.Exit(1)
+		}
+		if _, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile); err != nil {
+			logger.Error("assistant TLS identity invalid")
+			os.Exit(1)
+		}
+		assistantHandler, err := httpapi.NewAssistantIdentityHandler(persistent, cfg.ClientURI)
+		if err != nil {
+			logger.Error("assistant handler configuration invalid")
+			os.Exit(1)
+		}
+		assistantServer = &http.Server{Addr: cfg.Address, Handler: assistantHandler,
+			TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS13, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool},
+			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384}
+	}
+	serverErrors := make(chan error, 3)
 	go func() {
 		logger.Info("control service started", "address", configuration.Address, "environment", configuration.Environment, "store", storeName)
 		serverErrors <- server.ListenAndServe()
@@ -164,6 +202,11 @@ func main() {
 		go func() {
 			logger.Info("station mTLS interface started", "address", configuration.StationMTLSAddress)
 			serverErrors <- stationServer.ListenAndServeTLS(configuration.StationMTLSCertFile, configuration.StationMTLSKeyFile)
+		}()
+	}
+	if assistantServer != nil {
+		go func() {
+			serverErrors <- assistantServer.ListenAndServeTLS(configuration.AssistantMTLS.CertFile, configuration.AssistantMTLS.KeyFile)
 		}()
 	}
 
@@ -190,6 +233,13 @@ func main() {
 		if err := stationServer.Shutdown(shutdownContext); err != nil {
 			logger.Error("station interface shutdown failed", "error", err)
 			_ = stationServer.Close()
+			os.Exit(1)
+		}
+	}
+	if assistantServer != nil {
+		if err := assistantServer.Shutdown(shutdownContext); err != nil {
+			logger.Error("assistant interface shutdown failed")
+			_ = assistantServer.Close()
 			os.Exit(1)
 		}
 	}
