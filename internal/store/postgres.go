@@ -84,6 +84,10 @@ func OpenPostgres(databaseURL string, maxOpen, maxIdle int, _ time.Time) (*Postg
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize control repository: %w", err)
 	}
+	if err := seedPostgresSkillCatalog(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("initialize skill catalog: %w", err)
+	}
 	return &Postgres{db: db}, nil
 }
 

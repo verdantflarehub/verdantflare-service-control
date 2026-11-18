@@ -53,6 +53,8 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 
 	mux.HandleFunc("GET /api/control/market/apps", server.listApps)
 	mux.HandleFunc("GET /api/control/market/apps/{appID}", server.getApp)
+	mux.HandleFunc("GET /api/control/market/skills", server.listSkills)
+	mux.HandleFunc("GET /api/control/market/skills/{entryID}", server.getSkill)
 
 	mux.HandleFunc("GET /api/control/experience/sessions", server.listExperienceSessions)
 	mux.HandleFunc("POST /api/control/experience/sessions", server.createExperienceSession)
@@ -113,6 +115,10 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("GET /api/control/ops/v2/apps/{appID}/versions/{version}", server.getAppVersionV2)
 	mux.HandleFunc("PUT /api/control/ops/v2/apps/{appID}/release", server.selectAppReleaseV2)
 	mux.HandleFunc("GET /api/control/ops/v2/apps.yaml", server.opsAppsYAMLV2)
+	mux.HandleFunc("GET /api/control/ops/v2/skills", server.listManagedSkills)
+	mux.HandleFunc("GET /api/control/ops/v2/skills/{entryID}", server.getManagedSkill)
+	mux.HandleFunc("PATCH /api/control/ops/v2/skills/{entryID}", server.patchManagedSkill)
+	mux.HandleFunc("GET /api/control/ops/v2/skills/{entryID}/audit", server.skillAudit)
 
 	mux.HandleFunc("GET /api/control/station/v2/apps.yaml", server.stationAppsYAMLV2)
 	mux.HandleFunc("GET /api/control/station/v2/apps/{appID}/versions/{version}", server.stationAppVersionV2)

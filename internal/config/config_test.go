@@ -96,3 +96,22 @@ func TestInstallGrantPolicyIsParsed(t *testing.T) {
 		t.Fatalf("configured policy = %+v, %v", configuration.RequiredInstallGrantApps, err)
 	}
 }
+
+func TestSkillCatalogDemoRequiresNonProductionMemory(t *testing.T) {
+	t.Setenv("CONTROL_ENV", "development")
+	t.Setenv("CONTROL_DATABASE_URL", "")
+	t.Setenv("CONTROL_SKILL_CATALOG_DEMO", "true")
+	configuration, err := Load()
+	if err != nil || !configuration.SkillCatalogDemo {
+		t.Fatalf("non-production in-memory demo rejected: %+v, %v", configuration, err)
+	}
+	t.Setenv("CONTROL_DATABASE_URL", "postgres://localhost/control_test")
+	if _, err := Load(); err == nil {
+		t.Fatal("demo accepted with database")
+	}
+	t.Setenv("CONTROL_DATABASE_URL", "")
+	t.Setenv("CONTROL_ENV", "production")
+	if _, err := Load(); err == nil {
+		t.Fatal("demo accepted in production")
+	}
+}

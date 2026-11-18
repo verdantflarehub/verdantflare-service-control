@@ -103,7 +103,7 @@ jobs:
             --user=github-actions \
             --namespace=verdantflare
 
-      - name: Back up Control database and apply additive survey migration
+      - name: Back up Control database and apply additive migrations
         run: |
           set -eu
           current="$(kubectl --context verdantflare -n verdantflare get deployment verdantflare-service-control -o jsonpath='{.spec.template.spec.containers[?(@.name=="verdantflare-service-control")].image}')"
@@ -124,10 +124,17 @@ jobs:
           kubectl --context verdantflare -n verdantflare exec -i "$pod" -c postgres -- \
             sh -ec 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d control' \
             < migrations/postgres/007_survey_rows.sql
+          kubectl --context verdantflare -n verdantflare exec -i "$pod" -c postgres -- \
+            sh -ec 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d control' \
+            < migrations/postgres/008_skill_catalog.sql
           printf "SELECT storage_version FROM control_survey_state WHERE survey_id='yunnan-202610';\n" \
             | kubectl --context verdantflare -n verdantflare exec -i "$pod" -c postgres -- \
               sh -ec 'psql -XAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d control' \
             | grep -Eq '^[12]$'
+          printf "SELECT to_regclass('public.control_skill_catalog_entry') IS NOT NULL AND to_regclass('public.control_skill_catalog_audit') IS NOT NULL;\n" \
+            | kubectl --context verdantflare -n verdantflare exec -i "$pod" -c postgres -- \
+              sh -ec 'psql -XAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d control' \
+            | grep -qx 't'
 
       - name: Configure GHCR pull secret and update Service Control deployment
         env:

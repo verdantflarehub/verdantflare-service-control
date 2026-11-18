@@ -39,10 +39,13 @@ type Memory struct {
 	billing            map[string]domain.BillingSummary
 	releases           []domain.Release
 	opsOrgs            []domain.OperationsOrganization
+	skillEntries       map[string]domain.SkillCatalogEntry
+	skillAudit         []domain.SkillCatalogAuditEvent
 }
 
 // NewMemoryBootstrap creates only the operational identity needed to provision
-// real organizations. Catalog, metering, billing and experience data start empty.
+// real organizations. Operational catalogs, metering, billing and experience
+// data start empty; Skill editorial samples exist only as non-public drafts.
 func NewMemoryBootstrap() *Memory {
 	const organizationID = "org_verdantflare"
 	const adminSubject = "00000000-0000-4000-8000-000000000001"
@@ -64,7 +67,19 @@ func NewMemoryBootstrap() *Memory {
 		modelPublications:  map[string]domain.ModelPublicationStage{},
 		models:             []domain.Model{}, publicModels: map[string]domain.PublicModel{}, tasks: []domain.APITask{}, members: map[string][]domain.Member{},
 		billing: map[string]domain.BillingSummary{}, releases: []domain.Release{}, opsOrgs: []domain.OperationsOrganization{},
+		skillEntries: defaultSkillEntries(), skillAudit: []domain.SkillCatalogAuditEvent{},
 	}
+}
+
+// NewMemorySkillCatalogDemo exposes only the fixed editorial samples in an
+// isolated, non-persistent process. Production and PostgreSQL never use it.
+func NewMemorySkillCatalogDemo() *Memory {
+	memory := NewMemoryBootstrap()
+	for id, entry := range memory.skillEntries {
+		entry.Visibility = "listed"
+		memory.skillEntries[id] = entry
+	}
+	return memory
 }
 
 func NewMemorySeeded(now time.Time) *Memory {
@@ -100,14 +115,14 @@ func NewMemorySeeded(now time.Time) *Memory {
 			"00000000-0000-4000-8000-000000000001": {
 				CenterUserID: "cu_01HUB7C9Q", LoginSubject: "00000000-0000-4000-8000-000000000001", DisplayName: "默认管理员", Email: "admin@verdantflare.ai", ActiveOrganizationID: verdantflare.OrganizationID,
 				Memberships: []domain.Membership{
-					{OrganizationID: verdantflare.OrganizationID, Roles: []string{"organization_admin", "app_ops_admin", "customer_success_admin", "api_ops_admin"}},
+					{OrganizationID: verdantflare.OrganizationID, Roles: []string{"organization_admin", "app_ops_admin", "customer_success_admin", "api_ops_admin", "skill_ops_admin"}},
 					{OrganizationID: northshore.OrganizationID, Roles: []string{"organization_admin"}},
 				},
 			},
 			"logto_01vf9k2": {
 				CenterUserID: "cu_01HUB7C9Q", LoginSubject: "logto_01vf9k2", DisplayName: "赵涛", Email: "zhaotao@verdantflare.com", ActiveOrganizationID: verdantflare.OrganizationID,
 				Memberships: []domain.Membership{
-					{OrganizationID: verdantflare.OrganizationID, Roles: []string{"organization_admin", "app_ops_admin", "customer_success_admin", "api_ops_admin"}},
+					{OrganizationID: verdantflare.OrganizationID, Roles: []string{"organization_admin", "app_ops_admin", "customer_success_admin", "api_ops_admin", "skill_ops_admin"}},
 					{OrganizationID: northshore.OrganizationID, Roles: []string{"organization_admin"}},
 				},
 			},
@@ -159,6 +174,7 @@ func NewMemorySeeded(now time.Time) *Memory {
 			{ID: "org_northshore", Name: "北岸视觉工作室", Plan: "Studio", Members: 8, Apps: 12, APIUsage: "¥ 8,460", Expires: "2026-12-31", Status: "正常"},
 			{ID: "org_haiyu", Name: "海屿制作团队", Plan: "Pilot", Members: 4, Apps: 8, APIUsage: "¥ 1,820", Expires: "剩余 12 天", Status: "试用中"},
 		},
+		skillEntries: defaultSkillEntries(), skillAudit: []domain.SkillCatalogAuditEvent{},
 	}
 }
 

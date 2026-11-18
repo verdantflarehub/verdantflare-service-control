@@ -16,6 +16,7 @@ type Config struct {
 	DatabaseURL                 string
 	DatabaseMaxOpen             int
 	DatabaseMaxIdle             int
+	SkillCatalogDemo            bool
 	GatewayBaseURL              string
 	GatewayToken                string
 	GatewayAdminToken           string
@@ -59,6 +60,13 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("CONTROL_TRUST_AUTH_HEADERS must be true in production until JWT validation is configured")
 	}
 	databaseURL := strings.TrimSpace(os.Getenv("CONTROL_DATABASE_URL"))
+	skillCatalogDemo, err := strconv.ParseBool(env("CONTROL_SKILL_CATALOG_DEMO", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("CONTROL_SKILL_CATALOG_DEMO: %w", err)
+	}
+	if skillCatalogDemo && (environment != "development" && environment != "test" || databaseURL != "") {
+		return Config{}, fmt.Errorf("CONTROL_SKILL_CATALOG_DEMO requires a development/test in-memory Control process")
+	}
 	if environment == "production" && databaseURL == "" {
 		return Config{}, fmt.Errorf("CONTROL_DATABASE_URL is required in production")
 	}
@@ -129,6 +137,7 @@ func Load() (Config, error) {
 		Environment:                 environment,
 		Address:                     env("CONTROL_ADDRESS", ":8080"),
 		DatabaseURL:                 databaseURL,
+		SkillCatalogDemo:            skillCatalogDemo,
 		DatabaseMaxOpen:             positiveInt("CONTROL_DATABASE_MAX_OPEN", 5),
 		DatabaseMaxIdle:             positiveInt("CONTROL_DATABASE_MAX_IDLE", 2),
 		GatewayBaseURL:              gatewayBaseURL,
