@@ -59,6 +59,7 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("GET /api/control/resources/{resourceID}", server.getCreativeResource)
 	mux.HandleFunc("GET /api/control/resources/{resourceID}/image", server.getCreativeResourceImage)
 	mux.HandleFunc("GET /api/control/resources/{resourceID}/items/{itemID}/image", server.getCreativeResourceItemImage)
+	mux.HandleFunc("DELETE /api/control/resources/{resourceID}/items/{itemID}", server.deleteCreativeResourceItem)
 	mux.HandleFunc("POST /api/control/resources/{resourceID}/withdraw", server.withdrawCreativeResource)
 
 	mux.HandleFunc("GET /api/control/experience/sessions", server.listExperienceSessions)

@@ -78,6 +78,19 @@ func (s *Server) getCreativeResourceItemImage(writer http.ResponseWriter, reques
 	_, _ = writer.Write(img.Data)
 }
 
+func (s *Server) deleteCreativeResourceItem(writer http.ResponseWriter, request *http.Request) {
+	subject, ok := s.subject(writer, request)
+	if !ok {
+		return
+	}
+	res, withdrawn, err := s.service.DeleteCreativeResourceItem(request.Context(), subject, request.PathValue("resourceID"), request.PathValue("itemID"))
+	if err != nil {
+		s.writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"resource": res, "withdrawn": withdrawn})
+}
+
 func (s *Server) withdrawCreativeResource(writer http.ResponseWriter, request *http.Request) {
 	subject, ok := s.subject(writer, request)
 	if !ok {
@@ -231,6 +244,19 @@ func registerAssistantResourceRoutes(mux *http.ServeMux, repo any) {
 			return
 		}
 		writeJSON(w, http.StatusCreated, map[string]any{"item": appended})
+	})
+
+	mux.HandleFunc("DELETE /internal/assistant/resources/{resourceID}/items/{itemID}", func(w http.ResponseWriter, r *http.Request) {
+		orgID := strings.TrimSpace(r.URL.Query().Get("org_id"))
+		if orgID == "" {
+			orgID = "org_verdantflare"
+		}
+		updated, withdrawn, err := resStore.DeleteCreativeResourceItem(r.Context(), orgID, r.PathValue("resourceID"), r.PathValue("itemID"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"resource": updated, "withdrawn": withdrawn})
 	})
 
 	mux.HandleFunc("POST /internal/assistant/resources/{resourceID}/withdraw", func(w http.ResponseWriter, r *http.Request) {

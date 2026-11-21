@@ -38,6 +38,14 @@ func (s *Service) GetCreativeResourceItemImage(ctx context.Context, subject, res
 	return s.repository.GetCreativeResourceItemImage(ctx, org.OrganizationID, resourceID, itemID)
 }
 
+func (s *Service) DeleteCreativeResourceItem(ctx context.Context, subject, resourceID, itemID string) (domain.CreativeResource, bool, error) {
+	org, _, _, err := s.repository.ActiveOrganization(ctx, subject)
+	if err != nil {
+		return domain.CreativeResource{}, false, err
+	}
+	return s.repository.DeleteCreativeResourceItem(ctx, org.OrganizationID, resourceID, itemID)
+}
+
 func (s *Service) WithdrawCreativeResource(ctx context.Context, subject, resourceID string) (domain.CreativeResource, error) {
 	org, _, _, err := s.repository.ActiveOrganization(ctx, subject)
 	if err != nil {

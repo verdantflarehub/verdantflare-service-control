@@ -83,6 +83,7 @@ type CreativeResourceStore interface {
 	GetCreativeResource(context.Context, string, string) (domain.CreativeResource, error)
 	GetCreativeResourceImage(context.Context, string, string) (domain.CreativeResourceImage, error)
 	GetCreativeResourceItemImage(context.Context, string, string, string) (domain.CreativeResourceImage, error)
+	DeleteCreativeResourceItem(context.Context, string, string, string) (domain.CreativeResource, bool, error)
 	WithdrawCreativeResource(context.Context, string, string) (domain.CreativeResource, error)
 }
 
@@ -364,6 +365,59 @@ func (p *Postgres) GetCreativeResourceItemImage(ctx context.Context, orgID, reso
 	return img, nil
 }
 
+func (p *Postgres) DeleteCreativeResourceItem(ctx context.Context, orgID, resourceID, itemID string) (domain.CreativeResource, bool, error) {
+	res, err := p.GetCreativeResource(ctx, orgID, resourceID)
+	if err != nil {
+		return domain.CreativeResource{}, false, err
+	}
+	// If only 1 image exists (or synthetic base item), withdrawing that single item withdraws the whole resource
+	if len(res.Items) <= 1 || itemID == "base" {
+		wd, err := p.WithdrawCreativeResource(ctx, orgID, resourceID)
+		return wd, true, err
+	}
+	delRes, err := p.db.ExecContext(ctx,
+		`DELETE FROM control_creative_resource_item WHERE resource_id=$1 AND item_id=$2`,
+		resourceID, itemID)
+	if err != nil {
+		return domain.CreativeResource{}, false, fmt.Errorf("delete creative resource item: %w", err)
+	}
+	affected, _ := delRes.RowsAffected()
+	if affected == 0 {
+		return domain.CreativeResource{}, false, domain.NewError(404, "resource_item_not_found", "要删除的子图不存在")
+	}
+
+	// Sync parent cover image from the first remaining child item & update post_kind if back to 1 item
+	var remaining int
+	_ = p.db.QueryRowContext(ctx, `SELECT count(*) FROM control_creative_resource_item WHERE resource_id=$1`, resourceID).Scan(&remaining)
+	if remaining == 0 {
+		wd, err := p.WithdrawCreativeResource(ctx, orgID, resourceID)
+		return wd, true, err
+	}
+	_, _ = p.db.ExecContext(ctx, `
+		UPDATE control_creative_resource r
+		SET image_mime = first_item.image_mime,
+		    image_data = first_item.image_data,
+		    image_sha256 = first_item.image_sha256,
+		    model_name = COALESCE(NULLIF(first_item.model_name, ''), r.model_name),
+		    engine = COALESCE(NULLIF(first_item.engine, ''), r.engine),
+		    aspect_ratio = COALESCE(NULLIF(first_item.aspect_ratio, ''), r.aspect_ratio),
+		    resolution = COALESCE(NULLIF(first_item.resolution, ''), r.resolution),
+		    post_kind = CASE WHEN $2 <= 1 THEN 'single' ELSE r.post_kind END,
+		    revision = r.revision + 1,
+		    updated_at = NOW()
+		FROM (
+			SELECT image_mime, image_data, image_sha256, model_name, engine, aspect_ratio, resolution
+			FROM control_creative_resource_item
+			WHERE resource_id = $1
+			ORDER BY sort_order ASC, created_at ASC
+			LIMIT 1
+		) AS first_item
+		WHERE r.resource_id = $1`, resourceID, remaining)
+
+	updated, err := p.GetCreativeResource(ctx, orgID, resourceID)
+	return updated, false, err
+}
+
 func (p *Postgres) WithdrawCreativeResource(ctx context.Context, orgID, resourceID string) (domain.CreativeResource, error) {
 	item, err := scanCreativeResource(p.db.QueryRowContext(ctx,
 		`UPDATE control_creative_resource SET status='withdrawn', revision=revision+1, updated_at=NOW()
@@ -407,6 +461,9 @@ func (m *Memory) GetCreativeResourceImage(_ context.Context, _, _ string) (domai
 }
 func (m *Memory) GetCreativeResourceItemImage(_ context.Context, _, _, _ string) (domain.CreativeResourceImage, error) {
 	return domain.CreativeResourceImage{}, domain.NewError(404, "resource_item_not_found", "素材图片项不存在")
+}
+func (m *Memory) DeleteCreativeResourceItem(_ context.Context, _, _, _ string) (domain.CreativeResource, bool, error) {
+	return domain.CreativeResource{}, false, domain.NewError(404, "resource_item_not_found", "素材图片项不存在")
 }
 func (m *Memory) WithdrawCreativeResource(_ context.Context, _, _ string) (domain.CreativeResource, error) {
 	return domain.CreativeResource{}, domain.NewError(404, "resource_not_found", "创意素材不存在")
