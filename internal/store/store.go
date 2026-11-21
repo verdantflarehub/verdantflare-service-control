@@ -88,4 +88,5 @@ type Repository interface {
 	BeginModelPublication(context.Context, domain.ModelPublicationStage) (domain.ModelPublicationStage, error)
 	ModelPublication(context.Context, string) (domain.ModelPublicationStage, error)
 	AdvanceModelPublication(context.Context, string, string, domain.ModelPublicationStage) (domain.ModelPublicationStage, error)
+	CreativeResourceStore
 }

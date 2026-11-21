@@ -88,6 +88,10 @@ func OpenPostgres(databaseURL string, maxOpen, maxIdle int, _ time.Time) (*Postg
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize skill catalog: %w", err)
 	}
+	if err := ensureCreativeResourceSchema(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("initialize creative resources: %w", err)
+	}
 	return &Postgres{db: db}, nil
 }
 

@@ -74,6 +74,7 @@ func NewAssistantIdentityHandler(repository AssistantIdentityRepository, clientU
 	}
 	mux.HandleFunc("POST /internal/assistant/identity/resolve", handle(true))
 	mux.HandleFunc("POST /internal/assistant/identity/check", handle(false))
+	registerAssistantResourceRoutes(mux, repository)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if r.TLS == nil || r.TLS.Version < tls.VersionTLS13 || len(r.TLS.VerifiedChains) == 0 || len(r.TLS.PeerCertificates) == 0 {
