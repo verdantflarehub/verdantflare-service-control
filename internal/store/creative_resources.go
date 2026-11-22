@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS control_creative_resource (
     aspect_ratio TEXT NOT NULL DEFAULT '',
     resolution TEXT NOT NULL DEFAULT '',
     drive_path TEXT NOT NULL DEFAULT '',
+    verification_status TEXT NOT NULL DEFAULT 'verified' CHECK (verification_status IN ('verified', 'unverified')),
+    media_origin TEXT NOT NULL DEFAULT 'station_generated' CHECK (media_origin IN ('station_generated', 'author_original', 'none')),
+    analysis_summary TEXT NOT NULL DEFAULT '',
     image_mime TEXT NOT NULL DEFAULT 'image/png',
     image_data BYTEA NOT NULL,
     image_sha256 TEXT NOT NULL,
@@ -61,6 +64,10 @@ CREATE INDEX IF NOT EXISTS control_creative_resource_org_idx
     ON control_creative_resource (organization_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS control_creative_resource_item_res_idx
     ON control_creative_resource_item (resource_id, sort_order, created_at);
+ALTER TABLE control_creative_resource
+    ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'verified',
+    ADD COLUMN IF NOT EXISTS media_origin TEXT NOT NULL DEFAULT 'station_generated',
+    ADD COLUMN IF NOT EXISTS analysis_summary TEXT NOT NULL DEFAULT '';
 `
 
 func ensureCreativeResourceSchema(ctx context.Context, db *sql.DB) error {
@@ -87,7 +94,7 @@ type CreativeResourceStore interface {
 	WithdrawCreativeResource(context.Context, string, string) (domain.CreativeResource, error)
 }
 
-const creativeResourceCols = `resource_id, organization_id, owner_subject, title, category, subject_category, media_type, post_kind, prompt, prompt_origin, source_url, source_author, engine, model_name, aspect_ratio, resolution, drive_path, image_mime, image_sha256, revision, status, created_at, updated_at`
+const creativeResourceCols = `resource_id, organization_id, owner_subject, title, category, subject_category, media_type, post_kind, prompt, prompt_origin, source_url, source_author, engine, model_name, aspect_ratio, resolution, drive_path, verification_status, media_origin, analysis_summary, image_mime, image_sha256, revision, status, created_at, updated_at`
 
 func scanCreativeResource(row interface{ Scan(...any) error }) (domain.CreativeResource, error) {
 	var r domain.CreativeResource
@@ -95,6 +102,7 @@ func scanCreativeResource(row interface{ Scan(...any) error }) (domain.CreativeR
 		&r.ResourceID, &r.OrganizationID, &r.OwnerSubject, &r.Title, &r.Category, &r.SubjectCategory,
 		&r.MediaType, &r.PostKind, &r.Prompt, &r.PromptOrigin, &r.SourceURL, &r.SourceAuthor,
 		&r.Engine, &r.ModelName, &r.AspectRatio, &r.Resolution, &r.DrivePath,
+		&r.VerificationStatus, &r.MediaOrigin, &r.AnalysisSummary,
 		&r.ImageMime, &r.ImageSHA256, &r.Revision, &r.Status, &r.CreatedAt, &r.UpdatedAt,
 	)
 	if err == nil {
@@ -188,6 +196,12 @@ func (p *Postgres) CreateCreativeResource(ctx context.Context, r domain.Creative
 	if r.PromptOrigin == "" {
 		r.PromptOrigin = "extracted"
 	}
+	if r.VerificationStatus != "unverified" {
+		r.VerificationStatus = "verified"
+	}
+	if r.MediaOrigin != "author_original" && r.MediaOrigin != "none" {
+		r.MediaOrigin = "station_generated"
+	}
 	if r.ImageMime == "" {
 		r.ImageMime = "image/png"
 	}
@@ -198,12 +212,12 @@ func (p *Postgres) CreateCreativeResource(ctx context.Context, r domain.Creative
 		`INSERT INTO control_creative_resource (
 			resource_id, organization_id, owner_subject, title, category, subject_category, media_type, post_kind,
 			prompt, prompt_origin, source_url, source_author, engine, model_name, aspect_ratio,
-			resolution, drive_path, image_mime, image_data, image_sha256, revision, status
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,1,'active')
+			resolution, drive_path, verification_status, media_origin, analysis_summary, image_mime, image_data, image_sha256, revision, status
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,1,'active')
 		RETURNING `+creativeResourceCols,
 		r.ResourceID, r.OrganizationID, r.OwnerSubject, r.Title, r.Category, r.SubjectCategory, r.MediaType, r.PostKind,
 		r.Prompt, r.PromptOrigin, r.SourceURL, r.SourceAuthor, r.Engine, r.ModelName, r.AspectRatio,
-		r.Resolution, r.DrivePath, r.ImageMime, imageData, r.ImageSHA256,
+		r.Resolution, r.DrivePath, r.VerificationStatus, r.MediaOrigin, r.AnalysisSummary, r.ImageMime, imageData, r.ImageSHA256,
 	))
 	if err != nil {
 		return domain.CreativeResource{}, fmt.Errorf("create creative resource: %w", err)
@@ -266,8 +280,15 @@ func (p *Postgres) AppendCreativeResourceItem(ctx context.Context, resourceID, u
 		return domain.CreativeResourceItem{}, fmt.Errorf("append creative resource item: %w", err)
 	}
 	out.ImageURL = creativeResourceItemImageURL(out.ResourceID, out.ItemID)
+	promoteVerified := item.Engine != "" && item.Engine != "author"
 	if upgradePostKind == "compare" || upgradePostKind == "edit" {
-		_, _ = p.db.ExecContext(ctx, `UPDATE control_creative_resource SET post_kind=$2, revision=revision+1, updated_at=NOW() WHERE resource_id=$1`, resourceID, upgradePostKind)
+		if promoteVerified {
+			_, _ = p.db.ExecContext(ctx, `UPDATE control_creative_resource SET post_kind=$2, verification_status='verified', revision=revision+1, updated_at=NOW() WHERE resource_id=$1`, resourceID, upgradePostKind)
+		} else {
+			_, _ = p.db.ExecContext(ctx, `UPDATE control_creative_resource SET post_kind=$2, revision=revision+1, updated_at=NOW() WHERE resource_id=$1`, resourceID, upgradePostKind)
+		}
+	} else if promoteVerified {
+		_, _ = p.db.ExecContext(ctx, `UPDATE control_creative_resource SET verification_status='verified', revision=revision+1, updated_at=NOW() WHERE resource_id=$1`, resourceID)
 	}
 	return out, nil
 }
@@ -279,6 +300,7 @@ func (p *Postgres) ListCreativeResources(ctx context.Context, orgID, mediaType, 
 		`SELECT r.resource_id, r.organization_id, r.owner_subject, r.title, r.category, r.subject_category,
 		        r.media_type, r.post_kind, r.prompt, r.prompt_origin, r.source_url, r.source_author,
 		        r.engine, r.model_name, r.aspect_ratio, r.resolution, r.drive_path,
+		        r.verification_status, r.media_origin, r.analysis_summary,
 		        r.image_mime, r.image_sha256, r.revision, r.status, r.created_at, r.updated_at,
 		        GREATEST(1, (SELECT count(*) FROM control_creative_resource_item i WHERE i.resource_id = r.resource_id)) AS item_count
 		 FROM control_creative_resource r
@@ -298,6 +320,7 @@ func (p *Postgres) ListCreativeResources(ctx context.Context, orgID, mediaType, 
 			&r.ResourceID, &r.OrganizationID, &r.OwnerSubject, &r.Title, &r.Category, &r.SubjectCategory,
 			&r.MediaType, &r.PostKind, &r.Prompt, &r.PromptOrigin, &r.SourceURL, &r.SourceAuthor,
 			&r.Engine, &r.ModelName, &r.AspectRatio, &r.Resolution, &r.DrivePath,
+			&r.VerificationStatus, &r.MediaOrigin, &r.AnalysisSummary,
 			&r.ImageMime, &r.ImageSHA256, &r.Revision, &r.Status, &r.CreatedAt, &r.UpdatedAt,
 			&r.ItemCount,
 		); err != nil {

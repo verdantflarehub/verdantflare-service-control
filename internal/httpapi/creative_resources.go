@@ -123,8 +123,11 @@ func registerAssistantResourceRoutes(mux *http.ServeMux, repo any) {
 			ModelName      string `json:"model_name"`
 			AspectRatio    string `json:"aspect_ratio"`
 			Resolution     string `json:"resolution"`
-			DrivePath      string `json:"drive_path"`
-			ImageMime      string `json:"image_mime"`
+			DrivePath          string `json:"drive_path"`
+			VerificationStatus string `json:"verification_status"`
+			MediaOrigin        string `json:"media_origin"`
+			AnalysisSummary    string `json:"analysis_summary"`
+			ImageMime          string `json:"image_mime"`
 			ImageBase64    string `json:"image_base64"`
 		}
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<20))
@@ -178,8 +181,11 @@ func registerAssistantResourceRoutes(mux *http.ServeMux, repo any) {
 			ModelName:      strings.TrimSpace(input.ModelName),
 			AspectRatio:    strings.TrimSpace(input.AspectRatio),
 			Resolution:     strings.TrimSpace(input.Resolution),
-			DrivePath:      strings.TrimSpace(input.DrivePath),
-			ImageMime:      strings.TrimSpace(input.ImageMime),
+			DrivePath:          strings.TrimSpace(input.DrivePath),
+			VerificationStatus: strings.TrimSpace(input.VerificationStatus),
+			MediaOrigin:        strings.TrimSpace(input.MediaOrigin),
+			AnalysisSummary:    strings.TrimSpace(input.AnalysisSummary),
+			ImageMime:          strings.TrimSpace(input.ImageMime),
 		}, imgBytes)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

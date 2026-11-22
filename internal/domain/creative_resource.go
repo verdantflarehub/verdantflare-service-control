@@ -37,8 +37,11 @@ type CreativeResource struct {
 	ModelName      string                 `json:"modelName,omitempty"`
 	AspectRatio    string                 `json:"aspectRatio,omitempty"`
 	Resolution     string                 `json:"resolution,omitempty"`
-	DrivePath      string                 `json:"drivePath,omitempty"`
-	ImageMime      string                 `json:"imageMime"`
+	DrivePath          string                 `json:"drivePath,omitempty"`
+	VerificationStatus string                 `json:"verificationStatus"`
+	MediaOrigin        string                 `json:"mediaOrigin"`
+	AnalysisSummary    string                 `json:"analysisSummary,omitempty"`
+	ImageMime          string                 `json:"imageMime"`
 	ImageSHA256    string                 `json:"imageSha256"`
 	ImageURL       string                 `json:"imageUrl"`
 	ItemCount      int                    `json:"itemCount"`
