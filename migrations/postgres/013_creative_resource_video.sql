@@ -1,0 +1,8 @@
+BEGIN;
+
+ALTER TABLE control_creative_resource
+    ADD COLUMN IF NOT EXISTS video_mime TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS video_data BYTEA,
+    ADD COLUMN IF NOT EXISTS video_sha256 TEXT NOT NULL DEFAULT '';
+
+COMMIT;

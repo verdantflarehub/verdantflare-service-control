@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -80,6 +81,32 @@ func (s *Server) getCreativeResourceImage(writer http.ResponseWriter, request *h
 	writeCreativeImageResponse(writer, request, img)
 }
 
+func (s *Server) getCreativeResourceVideo(writer http.ResponseWriter, request *http.Request) {
+	subject, ok := s.subject(writer, request)
+	if !ok {
+		return
+	}
+	vid, err := s.service.GetCreativeResourceVideo(request.Context(), subject, request.PathValue("resourceID"))
+	if err != nil {
+		s.writeError(writer, request, err)
+		return
+	}
+	etag := `"` + vid.SHA256 + `"`
+	if inm := strings.TrimSpace(request.Header.Get("If-None-Match")); inm != "" && inm == etag {
+		writer.Header().Set("ETag", etag)
+		writer.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writer.Header().Set("Content-Type", vid.Mime)
+	writer.Header().Set("ETag", etag)
+	if strings.TrimSpace(request.URL.Query().Get("v")) != "" {
+		writer.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	} else {
+		writer.Header().Set("Cache-Control", "private, max-age=3600")
+	}
+	http.ServeContent(writer, request, request.PathValue("resourceID")+".mp4", time.Time{}, bytes.NewReader(vid.Data))
+}
+
 func (s *Server) getCreativeResourceItemImage(writer http.ResponseWriter, request *http.Request) {
 	subject, ok := s.subject(writer, request)
 	if !ok {
@@ -143,9 +170,11 @@ func registerAssistantResourceRoutes(mux *http.ServeMux, repo any) {
 			MediaOrigin        string `json:"media_origin"`
 			AnalysisSummary    string `json:"analysis_summary"`
 			ImageMime          string `json:"image_mime"`
-			ImageBase64    string `json:"image_base64"`
+			ImageBase64        string `json:"image_base64"`
+			VideoMime          string `json:"video_mime"`
+			VideoBase64        string `json:"video_base64"`
 		}
-		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<20))
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 40<<20))
 		if err := decoder.Decode(&input); err != nil {
 			http.Error(w, "invalid resource payload", http.StatusBadRequest)
 			return
@@ -205,6 +234,17 @@ func registerAssistantResourceRoutes(mux *http.ServeMux, repo any) {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if vB64 := strings.TrimSpace(input.VideoBase64); vB64 != "" {
+			if vidBytes, vErr := base64.StdEncoding.DecodeString(vB64); vErr == nil && len(vidBytes) > 0 {
+				if aErr := resStore.AttachCreativeResourceVideo(r.Context(), created.ResourceID, strings.TrimSpace(input.VideoMime), vidBytes); aErr == nil {
+					created.VideoMime = strings.TrimSpace(input.VideoMime)
+					if created.VideoMime == "" {
+						created.VideoMime = "video/mp4"
+					}
+					created.VideoURL = "/api/control/resources/" + created.ResourceID + "/video"
+				}
+			}
 		}
 		pathPrefix := "/prompts/images/"
 		if created.MediaType == "video" {

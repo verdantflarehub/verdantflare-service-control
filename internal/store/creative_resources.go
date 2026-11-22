@@ -67,7 +67,10 @@ CREATE INDEX IF NOT EXISTS control_creative_resource_item_res_idx
 ALTER TABLE control_creative_resource
     ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'verified',
     ADD COLUMN IF NOT EXISTS media_origin TEXT NOT NULL DEFAULT 'station_generated',
-    ADD COLUMN IF NOT EXISTS analysis_summary TEXT NOT NULL DEFAULT '';
+    ADD COLUMN IF NOT EXISTS analysis_summary TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS video_mime TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS video_data BYTEA,
+    ADD COLUMN IF NOT EXISTS video_sha256 TEXT NOT NULL DEFAULT '';
 `
 
 func ensureCreativeResourceSchema(ctx context.Context, db *sql.DB) error {
@@ -79,22 +82,28 @@ func creativeResourceImageURL(id string) string {
 	return "/api/control/resources/" + id + "/image"
 }
 
+func creativeResourceVideoURL(id string) string {
+	return "/api/control/resources/" + id + "/video"
+}
+
 func creativeResourceItemImageURL(resourceID, itemID string) string {
 	return "/api/control/resources/" + resourceID + "/items/" + itemID + "/image"
 }
 
 type CreativeResourceStore interface {
 	CreateCreativeResource(context.Context, domain.CreativeResource, []byte) (domain.CreativeResource, error)
+	AttachCreativeResourceVideo(context.Context, string, string, []byte) error
 	AppendCreativeResourceItem(context.Context, string, string, domain.CreativeResourceItem, []byte) (domain.CreativeResourceItem, error)
 	ListCreativeResources(context.Context, string, string, string) ([]domain.CreativeResource, error)
 	GetCreativeResource(context.Context, string, string) (domain.CreativeResource, error)
 	GetCreativeResourceImage(context.Context, string, string) (domain.CreativeResourceImage, error)
+	GetCreativeResourceVideo(context.Context, string, string) (domain.CreativeResourceImage, error)
 	GetCreativeResourceItemImage(context.Context, string, string, string) (domain.CreativeResourceImage, error)
 	DeleteCreativeResourceItem(context.Context, string, string, string) (domain.CreativeResource, bool, error)
 	WithdrawCreativeResource(context.Context, string, string) (domain.CreativeResource, error)
 }
 
-const creativeResourceCols = `resource_id, organization_id, owner_subject, title, category, subject_category, media_type, post_kind, prompt, prompt_origin, source_url, source_author, engine, model_name, aspect_ratio, resolution, drive_path, verification_status, media_origin, analysis_summary, image_mime, image_sha256, revision, status, created_at, updated_at`
+const creativeResourceCols = `resource_id, organization_id, owner_subject, title, category, subject_category, media_type, post_kind, prompt, prompt_origin, source_url, source_author, engine, model_name, aspect_ratio, resolution, drive_path, verification_status, media_origin, analysis_summary, image_mime, image_sha256, video_mime, video_sha256, revision, status, created_at, updated_at`
 
 func scanCreativeResource(row interface{ Scan(...any) error }) (domain.CreativeResource, error) {
 	var r domain.CreativeResource
@@ -103,10 +112,13 @@ func scanCreativeResource(row interface{ Scan(...any) error }) (domain.CreativeR
 		&r.MediaType, &r.PostKind, &r.Prompt, &r.PromptOrigin, &r.SourceURL, &r.SourceAuthor,
 		&r.Engine, &r.ModelName, &r.AspectRatio, &r.Resolution, &r.DrivePath,
 		&r.VerificationStatus, &r.MediaOrigin, &r.AnalysisSummary,
-		&r.ImageMime, &r.ImageSHA256, &r.Revision, &r.Status, &r.CreatedAt, &r.UpdatedAt,
+		&r.ImageMime, &r.ImageSHA256, &r.VideoMime, &r.VideoSHA256, &r.Revision, &r.Status, &r.CreatedAt, &r.UpdatedAt,
 	)
 	if err == nil {
 		r.ImageURL = creativeResourceImageURL(r.ResourceID)
+		if r.VideoSHA256 != "" {
+			r.VideoURL = creativeResourceVideoURL(r.ResourceID)
+		}
 		r.ItemCount = 1
 	}
 	return r, err
@@ -227,6 +239,29 @@ func (p *Postgres) CreateCreativeResource(ctx context.Context, r domain.Creative
 	return created, nil
 }
 
+func (p *Postgres) AttachCreativeResourceVideo(ctx context.Context, resourceID, videoMime string, videoData []byte) error {
+	if resourceID == "" || len(videoData) == 0 {
+		return domain.NewError(400, "invalid_video", "缺少视频内容")
+	}
+	if videoMime == "" {
+		videoMime = "video/mp4"
+	}
+	sum := sha256.Sum256(videoData)
+	shaHex := hex.EncodeToString(sum[:])
+	res, err := p.db.ExecContext(ctx,
+		`UPDATE control_creative_resource
+		 SET video_mime=$2, video_data=$3, video_sha256=$4, revision=revision+1, updated_at=NOW()
+		 WHERE resource_id=$1`,
+		resourceID, videoMime, videoData, shaHex)
+	if err != nil {
+		return fmt.Errorf("attach creative resource video: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return domain.NewError(404, "resource_not_found", "创意素材不存在")
+	}
+	return nil
+}
+
 func (p *Postgres) AppendCreativeResourceItem(ctx context.Context, resourceID, upgradePostKind string, item domain.CreativeResourceItem, imageData []byte) (domain.CreativeResourceItem, error) {
 	if resourceID == "" || item.ItemID == "" || len(imageData) == 0 {
 		return domain.CreativeResourceItem{}, domain.NewError(400, "invalid_item", "缺少媒体项字段或图片内容")
@@ -301,7 +336,7 @@ func (p *Postgres) ListCreativeResources(ctx context.Context, orgID, mediaType, 
 		        r.media_type, r.post_kind, r.prompt, r.prompt_origin, r.source_url, r.source_author,
 		        r.engine, r.model_name, r.aspect_ratio, r.resolution, r.drive_path,
 		        r.verification_status, r.media_origin, r.analysis_summary,
-		        r.image_mime, r.image_sha256, r.revision, r.status, r.created_at, r.updated_at,
+		        r.image_mime, r.image_sha256, r.video_mime, r.video_sha256, r.revision, r.status, r.created_at, r.updated_at,
 		        GREATEST(1, (SELECT count(*) FROM control_creative_resource_item i WHERE i.resource_id = r.resource_id)) AS item_count
 		 FROM control_creative_resource r
 		 WHERE (r.organization_id=$1 OR r.organization_id='verdantflare-team' OR $1='org_verdantflare')
@@ -321,12 +356,15 @@ func (p *Postgres) ListCreativeResources(ctx context.Context, orgID, mediaType, 
 			&r.MediaType, &r.PostKind, &r.Prompt, &r.PromptOrigin, &r.SourceURL, &r.SourceAuthor,
 			&r.Engine, &r.ModelName, &r.AspectRatio, &r.Resolution, &r.DrivePath,
 			&r.VerificationStatus, &r.MediaOrigin, &r.AnalysisSummary,
-			&r.ImageMime, &r.ImageSHA256, &r.Revision, &r.Status, &r.CreatedAt, &r.UpdatedAt,
+			&r.ImageMime, &r.ImageSHA256, &r.VideoMime, &r.VideoSHA256, &r.Revision, &r.Status, &r.CreatedAt, &r.UpdatedAt,
 			&r.ItemCount,
 		); err != nil {
 			return nil, fmt.Errorf("scan creative resource: %w", err)
 		}
 		r.ImageURL = creativeResourceImageURL(r.ResourceID)
+		if r.VideoSHA256 != "" {
+			r.VideoURL = creativeResourceVideoURL(r.ResourceID)
+		}
 		items = append(items, r)
 	}
 	return items, rows.Err()
@@ -365,6 +403,25 @@ func (p *Postgres) GetCreativeResourceImage(ctx context.Context, orgID, resource
 		return domain.CreativeResourceImage{}, fmt.Errorf("get creative resource image: %w", err)
 	}
 	return img, nil
+}
+
+func (p *Postgres) GetCreativeResourceVideo(ctx context.Context, orgID, resourceID string) (domain.CreativeResourceImage, error) {
+	var vid domain.CreativeResourceImage
+	err := p.db.QueryRowContext(ctx,
+		`SELECT video_mime, video_data, video_sha256 FROM control_creative_resource
+		 WHERE resource_id=$1 AND (organization_id=$2 OR organization_id='verdantflare-team' OR $2='org_verdantflare')
+		   AND video_data IS NOT NULL AND octet_length(video_data) > 0`,
+		resourceID, orgID).Scan(&vid.Mime, &vid.Data, &vid.SHA256)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.CreativeResourceImage{}, domain.NewError(404, "video_not_found", "创意素材视频不存在")
+	}
+	if err != nil {
+		return domain.CreativeResourceImage{}, fmt.Errorf("get creative resource video: %w", err)
+	}
+	if vid.Mime == "" {
+		vid.Mime = "video/mp4"
+	}
+	return vid, nil
 }
 
 func (p *Postgres) GetCreativeResourceItemImage(ctx context.Context, orgID, resourceID, itemID string) (domain.CreativeResourceImage, error) {
@@ -466,6 +523,12 @@ func (m *Memory) CreateCreativeResource(_ context.Context, r domain.CreativeReso
 	r.ItemCount = 1
 	r.ImageURL = creativeResourceImageURL(r.ResourceID)
 	return r, nil
+}
+func (m *Memory) AttachCreativeResourceVideo(_ context.Context, _, _ string, _ []byte) error {
+	return nil
+}
+func (m *Memory) GetCreativeResourceVideo(_ context.Context, _, _ string) (domain.CreativeResourceImage, error) {
+	return domain.CreativeResourceImage{}, domain.NewError(404, "video_not_found", "创意素材视频不存在")
 }
 func (m *Memory) AppendCreativeResourceItem(_ context.Context, resourceID, _ string, item domain.CreativeResourceItem, _ []byte) (domain.CreativeResourceItem, error) {
 	item.ResourceID = resourceID

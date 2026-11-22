@@ -42,8 +42,11 @@ type CreativeResource struct {
 	MediaOrigin        string                 `json:"mediaOrigin"`
 	AnalysisSummary    string                 `json:"analysisSummary,omitempty"`
 	ImageMime          string                 `json:"imageMime"`
-	ImageSHA256    string                 `json:"imageSha256"`
-	ImageURL       string                 `json:"imageUrl"`
+	ImageSHA256        string                 `json:"imageSha256"`
+	ImageURL           string                 `json:"imageUrl"`
+	VideoMime          string                 `json:"videoMime,omitempty"`
+	VideoSHA256        string                 `json:"videoSha256,omitempty"`
+	VideoURL           string                 `json:"videoUrl,omitempty"`
 	ItemCount      int                    `json:"itemCount"`
 	Items          []CreativeResourceItem `json:"items,omitempty"`
 	Revision       int                    `json:"revision"`

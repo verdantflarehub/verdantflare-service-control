@@ -30,6 +30,14 @@ func (s *Service) GetCreativeResourceImage(ctx context.Context, subject, resourc
 	return s.repository.GetCreativeResourceImage(ctx, org.OrganizationID, resourceID)
 }
 
+func (s *Service) GetCreativeResourceVideo(ctx context.Context, subject, resourceID string) (domain.CreativeResourceImage, error) {
+	org, _, _, err := s.repository.ActiveOrganization(ctx, subject)
+	if err != nil {
+		return domain.CreativeResourceImage{}, err
+	}
+	return s.repository.GetCreativeResourceVideo(ctx, org.OrganizationID, resourceID)
+}
+
 func (s *Service) GetCreativeResourceItemImage(ctx context.Context, subject, resourceID, itemID string) (domain.CreativeResourceImage, error) {
 	org, _, _, err := s.repository.ActiveOrganization(ctx, subject)
 	if err != nil {
