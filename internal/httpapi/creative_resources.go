@@ -44,6 +44,29 @@ func (s *Server) getCreativeResource(writer http.ResponseWriter, request *http.R
 	s.respond(writer, request, item, err, http.StatusOK)
 }
 
+func writeCreativeImageResponse(writer http.ResponseWriter, request *http.Request, img domain.CreativeResourceImage) {
+	mime := img.Mime
+	data := img.Data
+	etag := `"` + img.SHA256 + `"`
+	if reqW := parseRequestedWidth(request.URL.Query().Get("w")); reqW > 0 {
+		mime, data, etag = buildThumbnailJPEG(img.SHA256, img.Mime, img.Data, reqW)
+	}
+	if inm := strings.TrimSpace(request.Header.Get("If-None-Match")); inm != "" && inm == etag {
+		writer.Header().Set("ETag", etag)
+		writer.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writer.Header().Set("Content-Type", mime)
+	if strings.TrimSpace(request.URL.Query().Get("v")) != "" {
+		writer.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	} else {
+		writer.Header().Set("Cache-Control", "private, max-age=3600")
+	}
+	writer.Header().Set("ETag", etag)
+	writer.WriteHeader(http.StatusOK)
+	_, _ = writer.Write(data)
+}
+
 func (s *Server) getCreativeResourceImage(writer http.ResponseWriter, request *http.Request) {
 	subject, ok := s.subject(writer, request)
 	if !ok {
@@ -54,11 +77,7 @@ func (s *Server) getCreativeResourceImage(writer http.ResponseWriter, request *h
 		s.writeError(writer, request, err)
 		return
 	}
-	writer.Header().Set("Content-Type", img.Mime)
-	writer.Header().Set("Cache-Control", "private, max-age=300")
-	writer.Header().Set("ETag", `"`+img.SHA256+`"`)
-	writer.WriteHeader(http.StatusOK)
-	_, _ = writer.Write(img.Data)
+	writeCreativeImageResponse(writer, request, img)
 }
 
 func (s *Server) getCreativeResourceItemImage(writer http.ResponseWriter, request *http.Request) {
@@ -71,11 +90,7 @@ func (s *Server) getCreativeResourceItemImage(writer http.ResponseWriter, reques
 		s.writeError(writer, request, err)
 		return
 	}
-	writer.Header().Set("Content-Type", img.Mime)
-	writer.Header().Set("Cache-Control", "private, max-age=300")
-	writer.Header().Set("ETag", `"`+img.SHA256+`"`)
-	writer.WriteHeader(http.StatusOK)
-	_, _ = writer.Write(img.Data)
+	writeCreativeImageResponse(writer, request, img)
 }
 
 func (s *Server) deleteCreativeResourceItem(writer http.ResponseWriter, request *http.Request) {
