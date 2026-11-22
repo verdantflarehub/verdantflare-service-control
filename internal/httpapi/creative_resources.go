@@ -120,6 +120,33 @@ func (s *Server) getCreativeResourceItemImage(writer http.ResponseWriter, reques
 	writeCreativeImageResponse(writer, request, img)
 }
 
+func (s *Server) setCreativeResourceCover(writer http.ResponseWriter, request *http.Request) {
+	subject, ok := s.subject(writer, request)
+	if !ok {
+		return
+	}
+	res, err := s.service.SetCreativeResourceCover(request.Context(), subject, request.PathValue("resourceID"), request.PathValue("itemID"))
+	s.respond(writer, request, res, err, http.StatusOK)
+}
+
+func (s *Server) updateCreativeResource(writer http.ResponseWriter, request *http.Request) {
+	subject, ok := s.subject(writer, request)
+	if !ok {
+		return
+	}
+	var input struct {
+		Title           string `json:"title"`
+		Prompt          string `json:"prompt"`
+		SubjectCategory string `json:"subjectCategory"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil {
+		s.writeError(writer, request, domain.NewError(400, "invalid_payload", "请求体格式无效"))
+		return
+	}
+	res, err := s.service.UpdateCreativeResource(request.Context(), subject, request.PathValue("resourceID"), input.Title, input.Prompt, input.SubjectCategory)
+	s.respond(writer, request, res, err, http.StatusOK)
+}
+
 func (s *Server) deleteCreativeResourceItem(writer http.ResponseWriter, request *http.Request) {
 	subject, ok := s.subject(writer, request)
 	if !ok {

@@ -46,6 +46,22 @@ func (s *Service) GetCreativeResourceItemImage(ctx context.Context, subject, res
 	return s.repository.GetCreativeResourceItemImage(ctx, org.OrganizationID, resourceID, itemID)
 }
 
+func (s *Service) SetCreativeResourceCover(ctx context.Context, subject, resourceID, itemID string) (domain.CreativeResource, error) {
+	org, _, _, err := s.repository.ActiveOrganization(ctx, subject)
+	if err != nil {
+		return domain.CreativeResource{}, err
+	}
+	return s.repository.SetCreativeResourceCover(ctx, org.OrganizationID, resourceID, itemID)
+}
+
+func (s *Service) UpdateCreativeResource(ctx context.Context, subject, resourceID, title, prompt, subjectCategory string) (domain.CreativeResource, error) {
+	org, _, _, err := s.repository.ActiveOrganization(ctx, subject)
+	if err != nil {
+		return domain.CreativeResource{}, err
+	}
+	return s.repository.UpdateCreativeResource(ctx, org.OrganizationID, resourceID, title, prompt, subjectCategory)
+}
+
 func (s *Service) DeleteCreativeResourceItem(ctx context.Context, subject, resourceID, itemID string) (domain.CreativeResource, bool, error) {
 	org, _, _, err := s.repository.ActiveOrganization(ctx, subject)
 	if err != nil {

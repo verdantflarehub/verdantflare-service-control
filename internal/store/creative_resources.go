@@ -99,6 +99,8 @@ type CreativeResourceStore interface {
 	GetCreativeResourceImage(context.Context, string, string) (domain.CreativeResourceImage, error)
 	GetCreativeResourceVideo(context.Context, string, string) (domain.CreativeResourceImage, error)
 	GetCreativeResourceItemImage(context.Context, string, string, string) (domain.CreativeResourceImage, error)
+	SetCreativeResourceCover(context.Context, string, string, string) (domain.CreativeResource, error)
+	UpdateCreativeResource(context.Context, string, string, string, string, string) (domain.CreativeResource, error)
 	DeleteCreativeResourceItem(context.Context, string, string, string) (domain.CreativeResource, bool, error)
 	WithdrawCreativeResource(context.Context, string, string) (domain.CreativeResource, error)
 }
@@ -445,6 +447,70 @@ func (p *Postgres) GetCreativeResourceItemImage(ctx context.Context, orgID, reso
 	return img, nil
 }
 
+func (p *Postgres) SetCreativeResourceCover(ctx context.Context, orgID, resourceID, itemID string) (domain.CreativeResource, error) {
+	if resourceID == "" || itemID == "" {
+		return domain.CreativeResource{}, domain.NewError(400, "invalid_cover", "缺少作品或子图编号")
+	}
+	res, err := p.GetCreativeResource(ctx, orgID, resourceID)
+	if err != nil {
+		return domain.CreativeResource{}, err
+	}
+	if itemID == "base" {
+		return res, nil
+	}
+	var mime, sha, resolution string
+	var data []byte
+	err = p.db.QueryRowContext(ctx,
+		`SELECT image_mime, image_data, image_sha256, resolution
+		 FROM control_creative_resource_item
+		 WHERE resource_id=$1 AND item_id=$2`, resourceID, itemID,
+	).Scan(&mime, &data, &sha, &resolution)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.CreativeResource{}, domain.NewError(404, "resource_item_not_found", "指定的子图不存在")
+	}
+	if err != nil {
+		return domain.CreativeResource{}, fmt.Errorf("load cover item: %w", err)
+	}
+	if _, err := p.db.ExecContext(ctx,
+		`UPDATE control_creative_resource
+		 SET image_mime=$2, image_data=$3, image_sha256=$4,
+		     resolution=COALESCE(NULLIF($5, ''), resolution),
+		     revision=revision+1, updated_at=NOW()
+		 WHERE resource_id=$1`,
+		resourceID, mime, data, sha, resolution,
+	); err != nil {
+		return domain.CreativeResource{}, fmt.Errorf("update cover: %w", err)
+	}
+	return p.GetCreativeResource(ctx, orgID, resourceID)
+}
+
+func (p *Postgres) UpdateCreativeResource(ctx context.Context, orgID, resourceID, title, prompt, subjectCategory string) (domain.CreativeResource, error) {
+	if resourceID == "" {
+		return domain.CreativeResource{}, domain.NewError(400, "invalid_resource", "缺少作品编号")
+	}
+	if _, err := p.GetCreativeResource(ctx, orgID, resourceID); err != nil {
+		return domain.CreativeResource{}, err
+	}
+	t := strings.TrimSpace(title)
+	pr := strings.TrimSpace(prompt)
+	sc := strings.TrimSpace(subjectCategory)
+	if sc != "" && sc != "beauty" && sc != "handsome" && sc != "animal" {
+		return domain.CreativeResource{}, domain.NewError(400, "invalid_subject_category", "分类仅支持 beauty / handsome / animal")
+	}
+	if _, err := p.db.ExecContext(ctx,
+		`UPDATE control_creative_resource
+		 SET title=COALESCE(NULLIF($2, ''), title),
+		     prompt=COALESCE(NULLIF($3, ''), prompt),
+		     subject_category=COALESCE(NULLIF($4, ''), subject_category),
+		     revision=revision+1, updated_at=NOW()
+		 WHERE resource_id=$1`,
+		resourceID, t, pr, sc,
+	); err != nil {
+		return domain.CreativeResource{}, fmt.Errorf("update creative resource: %w", err)
+	}
+	return p.GetCreativeResource(ctx, orgID, resourceID)
+}
+
 func (p *Postgres) DeleteCreativeResourceItem(ctx context.Context, orgID, resourceID, itemID string) (domain.CreativeResource, bool, error) {
 	res, err := p.GetCreativeResource(ctx, orgID, resourceID)
 	if err != nil {
@@ -547,6 +613,12 @@ func (m *Memory) GetCreativeResourceImage(_ context.Context, _, _ string) (domai
 }
 func (m *Memory) GetCreativeResourceItemImage(_ context.Context, _, _, _ string) (domain.CreativeResourceImage, error) {
 	return domain.CreativeResourceImage{}, domain.NewError(404, "resource_item_not_found", "素材图片项不存在")
+}
+func (m *Memory) SetCreativeResourceCover(_ context.Context, _, _, _ string) (domain.CreativeResource, error) {
+	return domain.CreativeResource{}, domain.NewError(404, "resource_not_found", "创意素材不存在")
+}
+func (m *Memory) UpdateCreativeResource(_ context.Context, _, _, _, _, _ string) (domain.CreativeResource, error) {
+	return domain.CreativeResource{}, domain.NewError(404, "resource_not_found", "创意素材不存在")
 }
 func (m *Memory) DeleteCreativeResourceItem(_ context.Context, _, _, _ string) (domain.CreativeResource, bool, error) {
 	return domain.CreativeResource{}, false, domain.NewError(404, "resource_item_not_found", "素材图片项不存在")
