@@ -88,6 +88,39 @@ func TestStationMTLSRequiresCompleteSeparateListener(t *testing.T) {
 	}
 }
 
+func TestAgentHandoffRequiresDedicatedPersistentListener(t *testing.T) {
+	t.Setenv("CONTROL_ENV", "development")
+	t.Setenv("CONTROL_HANDOFF_MTLS_ADDRESS", "127.0.0.1:9443")
+	if _, err := Load(); err == nil {
+		t.Fatal("partial handoff configuration accepted")
+	}
+	t.Setenv("CONTROL_HANDOFF_MTLS_CA_FILE", "/run/secrets/handoff-ca.pem")
+	t.Setenv("CONTROL_HANDOFF_MTLS_CERT_FILE", "/run/secrets/control.pem")
+	t.Setenv("CONTROL_HANDOFF_MTLS_KEY_FILE", "/run/secrets/control-key.pem")
+	t.Setenv("CONTROL_HANDOFF_REGISTRY_FILE", "/run/secrets/handoff-registry.json")
+	t.Setenv("CONTROL_HANDOFF_ISSUER", "https://hub.example.test")
+	t.Setenv("CONTROL_HANDOFF_LOGIN_BASE_URL", "http://login-api:8088")
+	t.Setenv("CONTROL_HANDOFF_LOGIN_TOKEN", strings.Repeat("h", 32))
+	t.Setenv("CONTROL_HANDOFF_IDENTITY_FLOOR", "1")
+	t.Setenv("CONTROL_HANDOFF_EPOCH_FLOOR", "1")
+	if _, err := Load(); err == nil {
+		t.Fatal("handoff accepted without persistent database")
+	}
+	t.Setenv("CONTROL_DATABASE_URL", "postgres://localhost/control_test")
+	if _, err := Load(); err != nil {
+		t.Fatalf("complete handoff rejected: %v", err)
+	}
+	t.Setenv("CONTROL_HANDOFF_EPOCH_FLOOR", "0")
+	if _, err := Load(); err == nil {
+		t.Fatal("zero external epoch high-water floor accepted")
+	}
+	t.Setenv("CONTROL_HANDOFF_EPOCH_FLOOR", "1")
+	t.Setenv("CONTROL_HANDOFF_MTLS_ADDRESS", ":8080")
+	if _, err := Load(); err == nil {
+		t.Fatal("handoff shared public listener")
+	}
+}
+
 func TestInstallGrantPolicyIsParsed(t *testing.T) {
 	t.Setenv("CONTROL_ENV", "development")
 	t.Setenv("CONTROL_INSTALL_GRANT_REQUIRED_APPS", "private-admin,internal-tool")

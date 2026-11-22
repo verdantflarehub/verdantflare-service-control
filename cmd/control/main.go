@@ -125,6 +125,51 @@ func main() {
 		}
 	}()
 	handler := httpapi.New(configuration, service, logger)
+	var handoffServer *http.Server
+	if configuration.AgentHandoff.Address != "" {
+		cfg := configuration.AgentHandoff
+		persistent, ok := repository.(*store.Postgres)
+		if !ok {
+			logger.Error("agent handoff requires persistent repository")
+			os.Exit(1)
+		}
+		readyContext, cancelReady := context.WithTimeout(context.Background(), 5*time.Second)
+		readyErr := persistent.AgentHandoffReady(readyContext, cfg.IdentityFloor, cfg.EpochFloor)
+		cancelReady()
+		if readyErr != nil {
+			logger.Error("agent handoff revision and epoch must be initialized before enablement")
+			os.Exit(1)
+		}
+		loginClient, err := gateway.NewLoginHandoffClient(cfg.LoginBaseURL, cfg.LoginToken)
+		if err != nil {
+			logger.Error("invalid handoff Login client configuration")
+			os.Exit(1)
+		}
+		provider, err := httpapi.NewAgentHandoffProvider(persistent, loginClient, cfg.RegistryFile, cfg.Issuer)
+		if err != nil {
+			logger.Error("invalid handoff registry")
+			os.Exit(1)
+		}
+		handler.SetAgentHandoff(provider)
+		caPEM, err := os.ReadFile(cfg.CAFile)
+		if err != nil {
+			logger.Error("handoff CA unreadable")
+			os.Exit(1)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			logger.Error("handoff CA invalid")
+			os.Exit(1)
+		}
+		if _, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile); err != nil {
+			logger.Error("handoff TLS identity invalid")
+			os.Exit(1)
+		}
+		handoffServer = &http.Server{Addr: cfg.Address, Handler: provider.InternalHandler(),
+			TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS13, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool},
+			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second,
+			IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+	}
 
 	server := &http.Server{
 		Addr:              configuration.Address,
@@ -197,7 +242,7 @@ func main() {
 			TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS13, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool},
 			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384}
 	}
-	serverErrors := make(chan error, 3)
+	serverErrors := make(chan error, 4)
 	go func() {
 		logger.Info("control service started", "address", configuration.Address, "environment", configuration.Environment, "store", storeName)
 		serverErrors <- server.ListenAndServe()
@@ -211,6 +256,11 @@ func main() {
 	if assistantServer != nil {
 		go func() {
 			serverErrors <- assistantServer.ListenAndServeTLS(configuration.AssistantMTLS.CertFile, configuration.AssistantMTLS.KeyFile)
+		}()
+	}
+	if handoffServer != nil {
+		go func() {
+			serverErrors <- handoffServer.ListenAndServeTLS(configuration.AgentHandoff.CertFile, configuration.AgentHandoff.KeyFile)
 		}()
 	}
 
@@ -244,6 +294,13 @@ func main() {
 		if err := assistantServer.Shutdown(shutdownContext); err != nil {
 			logger.Error("assistant interface shutdown failed")
 			_ = assistantServer.Close()
+			os.Exit(1)
+		}
+	}
+	if handoffServer != nil {
+		if err := handoffServer.Shutdown(shutdownContext); err != nil {
+			logger.Error("agent handoff interface shutdown failed")
+			_ = handoffServer.Close()
 			os.Exit(1)
 		}
 	}

@@ -22,10 +22,11 @@ const maxBodyBytes = 1 << 20
 const maxPublicationBodyBytes = 5 << 20
 
 type Server struct {
-	config  config.Config
-	service *control.Service
-	logger  *slog.Logger
-	handler http.Handler
+	config       config.Config
+	service      *control.Service
+	logger       *slog.Logger
+	handler      http.Handler
+	agentHandoff *AgentHandoffProvider
 }
 
 func New(config config.Config, service *control.Service, logger *slog.Logger) *Server {
@@ -48,6 +49,8 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 	mux.HandleFunc("GET /api/control/ops/surveys/{surveyID}/responses/{responseID}", server.surveyResponse)
 
 	mux.HandleFunc("GET /api/control/context", server.getContext)
+	mux.HandleFunc("POST /api/control/agent-handoff/v1/intents/view", server.agentHandoffBrowser)
+	mux.HandleFunc("POST /api/control/agent-handoff/v1/intents/confirm", server.agentHandoffBrowser)
 	mux.HandleFunc("PUT /api/control/context/active-organization", server.setActiveOrganization)
 	mux.HandleFunc("GET /api/control/overview", server.getOverview)
 
@@ -150,6 +153,16 @@ func New(config config.Config, service *control.Service, logger *slog.Logger) *S
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	s.handler.ServeHTTP(writer, request)
+}
+
+func (s *Server) SetAgentHandoff(provider *AgentHandoffProvider) { s.agentHandoff = provider }
+
+func (s *Server) agentHandoffBrowser(writer http.ResponseWriter, request *http.Request) {
+	if s.agentHandoff == nil {
+		http.NotFound(writer, request)
+		return
+	}
+	s.agentHandoff.BrowserIntentHandler(writer, request)
 }
 
 func (s *Server) health(writer http.ResponseWriter, _ *http.Request) {

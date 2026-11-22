@@ -11,6 +11,7 @@ import (
 
 type Config struct {
 	AssistantMTLS               AssistantMTLS
+	AgentHandoff                AgentHandoff
 	Environment                 string
 	Address                     string
 	DatabaseURL                 string
@@ -132,8 +133,13 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	agentHandoff, err := loadAgentHandoff(env("CONTROL_ADDRESS", ":8080"), stationAddress, assistantMTLS.Address, databaseURL, loginDirectoryToken)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
 		AssistantMTLS:               assistantMTLS,
+		AgentHandoff:                agentHandoff,
 		Environment:                 environment,
 		Address:                     env("CONTROL_ADDRESS", ":8080"),
 		DatabaseURL:                 databaseURL,

@@ -21,6 +21,8 @@ type Postgres struct {
 
 type persistedState struct {
 	IdentityRevision   uint64                                  `json:"assistantIdentityRevision,string,omitempty"`
+	HandoffEpoch       uint64                                  `json:"handoffEpoch,string,omitempty"`
+	HandoffIntents     map[string]HandoffIntent                `json:"handoffIntents,omitempty"`
 	Users              map[string]domain.CenterUser            `json:"users"`
 	Organizations      map[string]domain.Organization          `json:"organizations"`
 	Apps               map[string]domain.App                   `json:"apps"`
@@ -162,7 +164,8 @@ func encodeMemory(m *Memory) ([]byte, error) {
 	}
 	raw, err := json.Marshal(persistedState{
 		IdentityRevision: m.identityRevision,
-		Users:            m.users, Organizations: m.organizations, Apps: m.apps, AppVersions: m.appVersions, StationGrants: m.stationGrants, Entitlements: m.entitlements,
+		HandoffEpoch:     m.handoffEpoch, HandoffIntents: m.handoffIntents,
+		Users: m.users, Organizations: m.organizations, Apps: m.apps, AppVersions: m.appVersions, StationGrants: m.stationGrants, Entitlements: m.entitlements,
 		Sessions: m.sessions, ModelRuns: m.modelRuns, APIKeys: keys, MCPTokens: tokens, Models: m.models, PublicModels: m.publicModels, ModelIcons: m.modelIcons, Tasks: m.tasks,
 		CredentialTickets:  m.credentialTickets,
 		ModelProbeReceipts: m.modelProbeReceipts,
@@ -197,7 +200,8 @@ func decodeMemory(raw []byte) (*Memory, error) {
 	}
 	return &Memory{
 		identityRevision: state.IdentityRevision,
-		users:            state.Users, organizations: state.Organizations, apps: state.Apps, appVersions: state.AppVersions, stationGrants: state.StationGrants,
+		handoffEpoch:     state.HandoffEpoch, handoffIntents: state.HandoffIntents,
+		users: state.Users, organizations: state.Organizations, apps: state.Apps, appVersions: state.AppVersions, stationGrants: state.StationGrants,
 		entitlements: state.Entitlements, sessions: state.Sessions, modelRuns: state.ModelRuns, apiKeys: keys, mcpTokens: tokens,
 		credentialTickets:  state.CredentialTickets,
 		modelProbeReceipts: state.ModelProbeReceipts,

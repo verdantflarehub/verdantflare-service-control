@@ -16,6 +16,8 @@ import (
 type Memory struct {
 	mu               sync.RWMutex
 	identityRevision uint64
+	handoffEpoch     uint64
+	handoffIntents   map[string]HandoffIntent
 	surveys          map[string]domain.SurveyState
 
 	users              map[string]domain.CenterUser
