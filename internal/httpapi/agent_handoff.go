@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
@@ -31,11 +32,14 @@ type agentHandoffRepository interface {
 	ExchangeHandoff(context.Context, store.HandoffExchangeInput, string, string, string, store.HandoffLoginFact, time.Time) (store.HandoffProof, error)
 	CheckHandoff(context.Context, string, string, string, string, string, string, string) (store.HandoffIdentity, error)
 	ResolveHandoffIdentity(context.Context, string, string) (store.HandoffIdentity, error)
+	DirectoryRevision(context.Context) (string, time.Time, error)
+	CheckDirectoryMember(context.Context, string, string, string) (store.HandoffIdentity, error)
 }
 
 type agentHandoffLogin interface {
 	Resolve(context.Context, string) (gateway.LoginHandoffFact, error)
 	Check(context.Context, string, string) (gateway.LoginHandoffFact, error)
+	CheckSubject(context.Context, string) (gateway.LoginSubjectFact, error)
 }
 
 type AgentHandoffProvider struct {
@@ -43,6 +47,13 @@ type AgentHandoffProvider struct {
 	login        agentHandoffLogin
 	registryFile string
 	issuer       string
+	directoryMu  sync.Mutex
+	directoryUse map[string]directoryRateWindow
+}
+
+type directoryRateWindow struct {
+	Started time.Time
+	Count   int
 }
 
 func NewAgentHandoffProvider(repository agentHandoffRepository, login agentHandoffLogin, registryFile, issuer string) (*AgentHandoffProvider, error) {
@@ -52,7 +63,7 @@ func NewAgentHandoffProvider(repository agentHandoffRepository, login agentHando
 	if _, err := loadHandoffRegistry(registryFile); err != nil {
 		return nil, err
 	}
-	return &AgentHandoffProvider{repository: repository, login: login, registryFile: registryFile, issuer: issuer}, nil
+	return &AgentHandoffProvider{repository: repository, login: login, registryFile: registryFile, issuer: issuer, directoryUse: map[string]directoryRateWindow{}}, nil
 }
 
 func handoffError(w http.ResponseWriter, err error) {
@@ -172,6 +183,24 @@ type handoffBrowserViewRequest struct {
 	RequestRef string `json:"request_ref"`
 }
 
+type handoffDirectoryRevisionRequest struct {
+	ProtocolVersion int    `json:"protocol_version"`
+	ProviderRef     string `json:"provider_ref"`
+	RecipientRef    string `json:"recipient_client_ref"`
+	StationID       string `json:"station_id"`
+}
+
+type handoffDirectoryMemberRequest struct {
+	ProtocolVersion  int    `json:"protocol_version"`
+	ProviderRef      string `json:"provider_ref"`
+	RecipientRef     string `json:"recipient_client_ref"`
+	StationID        string `json:"station_id"`
+	LocalOrgRef      string `json:"target_local_organization_ref"`
+	ExternalOrgRef   string `json:"external_organization_ref"`
+	SubjectRef       string `json:"subject_ref"`
+	ExpectedRevision string `json:"expected_identity_revision"`
+}
+
 func handoffIdentifier(value string) bool {
 	if value == "" || len(value) > 256 || strings.TrimSpace(value) != value {
 		return false
@@ -196,6 +225,8 @@ func (p *AgentHandoffProvider) InternalHandler() http.Handler {
 	mux.HandleFunc("POST /internal/agent-handoff/v1/intents/cancel", p.cancel)
 	mux.HandleFunc("POST /internal/agent-handoff/v1/exchanges", p.exchange)
 	mux.HandleFunc("POST /internal/agent-handoff/v1/authentications/check", p.status)
+	mux.HandleFunc("POST /internal/agent-handoff/v1/directory/revision", p.directoryRevision)
+	mux.HandleFunc("POST /internal/agent-handoff/v1/directory/members/check", p.directoryMember)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if r.TLS == nil || r.TLS.Version < tls.VersionTLS13 || len(r.TLS.VerifiedChains) == 0 || len(r.TLS.PeerCertificates) == 0 || len(r.TLS.PeerCertificates[0].URIs) != 1 {

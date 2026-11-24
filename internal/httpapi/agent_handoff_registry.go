@@ -82,10 +82,15 @@ func loadHandoffRegistry(path string) (handoffRegistry, error) {
 			seenCertificates[digest] = true
 		}
 		routes := map[string]bool{}
+		localOrganizations := map[string]string{}
 		for _, route := range consumer.Routes {
 			if route.LocalOrgRef == "" || route.ExternalOrgRef == "" || route.CallbackRef == "" || routes[route.LocalOrgRef+"|"+route.CallbackRef] {
 				return handoffRegistry{}, errors.New("invalid handoff route")
 			}
+			if previous, exists := localOrganizations[route.LocalOrgRef]; exists && previous != route.ExternalOrgRef {
+				return handoffRegistry{}, errors.New("ambiguous handoff organization route")
+			}
+			localOrganizations[route.LocalOrgRef] = route.ExternalOrgRef
 			routes[route.LocalOrgRef+"|"+route.CallbackRef] = true
 			callback, err := url.Parse(route.CallbackURL)
 			if err != nil || callback.Scheme != "https" || callback.Host == "" || callback.User != nil || callback.Fragment != "" || callback.RawQuery != "" {
@@ -98,6 +103,20 @@ func loadHandoffRegistry(path string) (handoffRegistry, error) {
 		}
 	}
 	return registry, nil
+}
+
+func (r handoffRegistry) directoryRoute(recipient, station, localOrg, externalOrg string) (handoffConsumer, bool) {
+	for _, consumer := range r.Consumers {
+		if !consumer.Enabled || consumer.RecipientRef != recipient || consumer.StationID != station {
+			continue
+		}
+		for _, route := range consumer.Routes {
+			if route.LocalOrgRef == localOrg && route.ExternalOrgRef == externalOrg {
+				return consumer, true
+			}
+		}
+	}
+	return handoffConsumer{}, false
 }
 
 func (r handoffRegistry) route(recipient, station, localOrg, externalOrg, callbackRef string) (handoffConsumer, handoffRoute, bool) {

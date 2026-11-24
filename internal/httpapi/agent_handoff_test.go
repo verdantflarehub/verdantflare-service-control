@@ -28,6 +28,9 @@ func (handoffLoginStub) Resolve(context.Context, string) (gateway.LoginHandoffFa
 func (handoffLoginStub) Check(context.Context, string, string) (gateway.LoginHandoffFact, error) {
 	return gateway.LoginHandoffFact{}, nil
 }
+func (handoffLoginStub) CheckSubject(_ context.Context, subject string) (gateway.LoginSubjectFact, error) {
+	return gateway.LoginSubjectFact{SubjectRef: subject, Active: true, CheckedAt: time.Now().UTC()}, nil
+}
 
 type browserHandoffLoginStub struct{}
 
@@ -36,6 +39,9 @@ func (browserHandoffLoginStub) Resolve(context.Context, string) (gateway.LoginHa
 }
 func (browserHandoffLoginStub) Check(context.Context, string, string) (gateway.LoginHandoffFact, error) {
 	return gateway.LoginHandoffFact{}, nil
+}
+func (browserHandoffLoginStub) CheckSubject(_ context.Context, subject string) (gateway.LoginSubjectFact, error) {
+	return gateway.LoginSubjectFact{SubjectRef: subject, Active: true, CheckedAt: time.Now().UTC()}, nil
 }
 
 type browserHandoffRepository struct {
