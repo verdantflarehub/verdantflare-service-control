@@ -131,7 +131,10 @@ func TestLunaEngineeringExample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := "4b25e83038c12b596f2a9d2a2c4a46f24d3bb1be51bfbaa739ee208daae3f721"
+	expected := os.Getenv("CONTROL_TEST_SKILL_EXAMPLE_SHA256")
+	if expected == "" {
+		expected = "4b25e83038c12b596f2a9d2a2c4a46f24d3bb1be51bfbaa739ee208daae3f721"
+	}
 	receipt, err := VerifyEngineeringExample(data, expected)
 	if err != nil {
 		t.Fatal(err)
