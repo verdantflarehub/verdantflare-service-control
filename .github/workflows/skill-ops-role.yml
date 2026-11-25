@@ -67,6 +67,9 @@ jobs:
               | jq -r --arg app "$app" '.items[] | select(.metadata.ownerReferences[0].name == $app) | [.metadata.creationTimestamp, .metadata.annotations["deployment.kubernetes.io/revision"], (.spec.template.spec.containers[0].image), (.status.replicas|tostring)] | @tsv' \
               | sort | tail -6
           done
+          echo "== recent events for Control pods"
+          kubectl --context verdantflare -n verdantflare get events --sort-by=.lastTimestamp -o json \
+            | jq -r '.items[] | select(.involvedObject.name | startswith("verdantflare-service-control")) | [.lastTimestamp, .involvedObject.name, .reason, (.message|.[0:300])] | @tsv' | tail -25
 
       - name: Roll Hub back to the hub-v1.7.24 ReplicaSet
         if: inputs.action == 'restore-hub-v1.7.24'
