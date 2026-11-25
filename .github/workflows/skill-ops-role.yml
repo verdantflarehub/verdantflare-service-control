@@ -6,17 +6,17 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: status shows roles; grant adds skill_ops_admin
+        description: image shows the deployed Control image; status shows roles; grant adds skill_ops_admin
         type: choice
-        options: [status, grant]
+        options: [image, status, grant]
         default: status
       subject:
-        description: exact Login subject
-        required: true
+        description: exact Login subject (not needed for image)
+        required: false
         type: string
       organization:
-        description: exact organization ID
-        required: true
+        description: exact organization ID (not needed for image)
+        required: false
         type: string
 
 permissions:
@@ -56,6 +56,12 @@ jobs:
           kubectl config set-credentials github-actions --token="$KUBERNETES_TOKEN"
           kubectl config set-context verdantflare --cluster=verdantflare --user=github-actions --namespace=verdantflare
 
+      - name: Show deployed Control image
+        run: |
+          kubectl --context verdantflare -n verdantflare get deployment verdantflare-service-control \
+            -o jsonpath='{.spec.template.spec.containers[?(@.name=="verdantflare-service-control")].image}{"\n"}'
+          kubectl --context verdantflare -n verdantflare rollout status deployment/verdantflare-service-control --timeout=30s
+
       - name: Back up Control database before a grant
         if: inputs.action == 'grant'
         run: |
@@ -74,6 +80,7 @@ jobs:
           '
 
       - name: Run skill-ops-role in Control
+        if: inputs.action != 'image'
         env:
           ACTION: ${{ inputs.action }}
           SUBJECT: ${{ inputs.subject }}
