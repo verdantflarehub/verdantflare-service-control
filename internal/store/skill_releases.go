@@ -144,3 +144,47 @@ func actionFor(status string) string {
 	}
 	return "withdraw"
 }
+
+// GrantSkillOperator adds skill_ops_admin to one existing, active membership.
+// It never creates users or memberships; repeating it is a no-op.
+func (m *Memory) GrantSkillOperator(_ context.Context, subject, organizationID string) ([]string, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	user, ok := m.users[subject]
+	if !ok {
+		return nil, false, domain.NewError(404, "center_user_not_found", "登录主体尚未绑定 Center User")
+	}
+	for i, membership := range user.Memberships {
+		if membership.OrganizationID != organizationID {
+			continue
+		}
+		if membership.Status == "停用" {
+			return nil, false, domain.NewError(409, "membership_disabled", "该组织成员资格已停用")
+		}
+		for _, role := range membership.Roles {
+			if role == "skill_ops_admin" {
+				return append([]string(nil), membership.Roles...), false, nil
+			}
+		}
+		user.Memberships[i].Roles = append(append([]string(nil), membership.Roles...), "skill_ops_admin")
+		m.users[subject] = user
+		return append([]string(nil), user.Memberships[i].Roles...), true, nil
+	}
+	return nil, false, domain.NewError(404, "membership_not_found", "该账号不在指定组织中")
+}
+
+// SkillOperatorRoles reports the roles of one membership without changing anything.
+func (m *Memory) SkillOperatorRoles(_ context.Context, subject, organizationID string) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	user, ok := m.users[subject]
+	if !ok {
+		return nil, domain.NewError(404, "center_user_not_found", "登录主体尚未绑定 Center User")
+	}
+	for _, membership := range user.Memberships {
+		if membership.OrganizationID == organizationID {
+			return append([]string(nil), membership.Roles...), nil
+		}
+	}
+	return nil, domain.NewError(404, "membership_not_found", "该账号不在指定组织中")
+}

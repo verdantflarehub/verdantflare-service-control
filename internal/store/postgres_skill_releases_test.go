@@ -72,3 +72,21 @@ func TestSkillReleaseSurvivesPostgresReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestGrantSkillOperatorOnlyTouchesExistingMembership(t *testing.T) {
+	m := NewMemorySeeded(time.Now())
+	ctx := context.Background()
+	roles, changed, err := m.GrantSkillOperator(ctx, "logto_01vf9k2", "org_northshore")
+	if err != nil || !changed || roles[len(roles)-1] != "skill_ops_admin" {
+		t.Fatalf("roles=%v changed=%v err=%v", roles, changed, err)
+	}
+	if _, changed, err := m.GrantSkillOperator(ctx, "logto_01vf9k2", "org_northshore"); err != nil || changed {
+		t.Fatalf("repeat changed=%v err=%v", changed, err)
+	}
+	if _, _, err := m.GrantSkillOperator(ctx, "unknown", "org_northshore"); err == nil {
+		t.Fatal("unknown subject granted")
+	}
+	if _, _, err := m.GrantSkillOperator(ctx, "logto_01vf9k2", "org_missing"); err == nil {
+		t.Fatal("missing membership granted")
+	}
+}

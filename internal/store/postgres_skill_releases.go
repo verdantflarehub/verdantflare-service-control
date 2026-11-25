@@ -227,3 +227,20 @@ func (p *Postgres) RecordSkillReleaseEvent(ctx context.Context, e domain.SkillRe
 		VALUES ($1,$2,$3,$4,$5)`, e.ReleaseID, e.Action, e.FileName, e.ActorSubject, e.OrganizationID)
 	return err
 }
+
+func (p *Postgres) GrantSkillOperator(ctx context.Context, subject, organizationID string) (roles []string, changed bool, err error) {
+	err = p.mutate(ctx, func(m *Memory) error {
+		var e error
+		roles, changed, e = m.GrantSkillOperator(ctx, subject, organizationID)
+		return e
+	})
+	return
+}
+
+func (p *Postgres) SkillOperatorRoles(ctx context.Context, subject, organizationID string) ([]string, error) {
+	m, err := p.read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return m.SkillOperatorRoles(ctx, subject, organizationID)
+}
