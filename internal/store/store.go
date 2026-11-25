@@ -62,6 +62,11 @@ type Repository interface {
 	CreateSkillEntry(context.Context, domain.SkillCatalogEntry, string, string) (domain.SkillCatalogEntry, error)
 	UpdateSkillEntryCAS(context.Context, string, int, domain.SkillCatalogEntry, string, string) (domain.SkillCatalogEntry, error)
 	ListSkillAudit(context.Context, string) ([]domain.SkillCatalogAuditEvent, error)
+	CreateSkillRelease(context.Context, domain.SkillRelease, string, string) (domain.SkillRelease, bool, error)
+	ListSkillReleases(context.Context) ([]domain.SkillRelease, error)
+	SetSkillReleaseStatus(context.Context, string, string, string, string) (domain.SkillRelease, error)
+	SkillReleaseFile(context.Context, string, string) (domain.SkillReleaseFile, error)
+	RecordSkillReleaseEvent(context.Context, domain.SkillReleaseAuditEvent) error
 	ListManagedModels(context.Context) ([]domain.PublicModel, error)
 	CreateManagedModel(context.Context, domain.PublicModel) (domain.PublicModel, error)
 	UpdateManagedModel(context.Context, string, domain.PublicModel) (domain.PublicModel, error)

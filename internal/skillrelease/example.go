@@ -18,7 +18,7 @@ import (
 
 const (
 	maxArchiveBytes = 32 << 20
-	maxEntries      = 256
+	maxEntries      = 512
 	maxEntryBytes   = 16 << 20
 	maxTotalBytes   = 64 << 20
 )

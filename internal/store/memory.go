@@ -43,6 +43,8 @@ type Memory struct {
 	opsOrgs            []domain.OperationsOrganization
 	skillEntries       map[string]domain.SkillCatalogEntry
 	skillAudit         []domain.SkillCatalogAuditEvent
+	skillReleases      map[string]domain.SkillRelease
+	skillReleaseAudit  []domain.SkillReleaseAuditEvent
 }
 
 // NewMemoryBootstrap creates only the operational identity needed to provision
