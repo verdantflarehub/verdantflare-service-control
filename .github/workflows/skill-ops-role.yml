@@ -61,6 +61,12 @@ jobs:
           kubectl --context verdantflare -n verdantflare get deployment verdantflare-service-control \
             -o jsonpath='{.spec.template.spec.containers[?(@.name=="verdantflare-service-control")].image}{"\n"}'
           kubectl --context verdantflare -n verdantflare rollout status deployment/verdantflare-service-control --timeout=30s
+          for app in verdantflare-service-control verdantflare-hub; do
+            echo "== recent ReplicaSets for $app"
+            kubectl --context verdantflare -n verdantflare get rs -o json \
+              | jq -r --arg app "$app" '.items[] | select(.metadata.ownerReferences[0].name == $app) | [.metadata.creationTimestamp, .metadata.annotations["deployment.kubernetes.io/revision"], (.spec.template.spec.containers[0].image), (.status.replicas|tostring)] | @tsv' \
+              | sort | tail -6
+          done
 
       - name: Back up Control database before a grant
         if: inputs.action == 'grant'
