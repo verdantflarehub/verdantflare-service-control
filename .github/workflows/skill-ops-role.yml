@@ -8,8 +8,12 @@ on:
       action:
         description: image shows the deployed Control image; status shows roles; grant adds skill_ops_admin
         type: choice
-        options: [image, status, grant, restore-hub-v1.7.24]
+        options: [image, find, status, grant, restore-hub-v1.7.24]
         default: status
+      email:
+        description: login email to look up (find only)
+        required: false
+        type: string
       subject:
         description: exact Login subject (not needed for image)
         required: false
@@ -80,6 +84,19 @@ jobs:
           kubectl --context verdantflare -n verdantflare rollout undo deployment/verdantflare-hub --to-revision=15
           kubectl --context verdantflare -n verdantflare rollout status deployment/verdantflare-hub --timeout=5m
           kubectl --context verdantflare -n verdantflare get deployment verdantflare-hub -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+
+      - name: Find Center users by email (read-only)
+        if: inputs.action == 'find'
+        env:
+          EMAIL: ${{ inputs.email }}
+        run: |
+          set -eu
+          printf '%s' "$EMAIL" | grep -Eqx '[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}'
+          pod="$(kubectl --context verdantflare -n verdantflare get pods -l app=postgres,owner=sc -o jsonpath='{.items[0].metadata.name}')"
+          test -n "$pod"
+          printf '%s\n' "SELECT u.key AS subject, m->>'organizationId' AS organization, m->'roles' AS roles, coalesce(m->>'status','') AS status FROM control_repository_state s, jsonb_each(s.state->'users') u, jsonb_array_elements(coalesce(u.value->'Memberships','[]'::jsonb)) m WHERE lower(u.value->>'Email') = lower(:'email');" \
+            | kubectl --context verdantflare -n verdantflare exec -i "$pod" -c postgres -- \
+              sh -ec 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d control -A -F " | " -v email="$1"' sh "$EMAIL"
 
       - name: Back up Control database before a grant
         if: inputs.action == 'grant'
