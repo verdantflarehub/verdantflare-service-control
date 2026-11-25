@@ -1,6 +1,7 @@
 # Manually build the current dev branch and deploy it to Center production.
 # Refuses unless production still runs the expected image; rolls back if the
-# new ReplicaSet does not become ready. Does not modify the ghcr-pull secret.
+# new ReplicaSet does not become ready. Refreshes ghcr-pull with this run's
+# token, as the release workflows do, so the node can pull the new image.
 name: deploy-prod-from-dev
 
 on:
@@ -122,6 +123,18 @@ jobs:
             pg_restore -l "$backup_file" >/dev/null
             echo "Control database backup verified: $backup_file"
           '
+
+      - name: Refresh the GHCR pull secret for this deploy
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          kubectl --context verdantflare -n verdantflare create secret docker-registry ghcr-pull \
+            --docker-server=ghcr.io --docker-username="$GHCR_USER" --docker-password="$GHCR_TOKEN" \
+            --dry-run=client -o yaml | kubectl --context verdantflare -n verdantflare apply -f -
+          kubectl --context verdantflare -n verdantflare patch serviceaccount default \
+            -p '{"imagePullSecrets":[{"name":"ghcr-pull"}]}'
 
       - name: Switch image, roll back if it does not become ready
         env:
