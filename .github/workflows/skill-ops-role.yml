@@ -1,0 +1,86 @@
+# Manually show or grant skill_ops_admin on one existing production membership.
+# Uses the same KUBERNETES_* secrets as the release deployment.
+name: skill-ops-role
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: status shows roles; grant adds skill_ops_admin
+        type: choice
+        options: [status, grant]
+        default: status
+      subject:
+        description: exact Login subject
+        required: true
+        type: string
+      organization:
+        description: exact organization ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verdantflare-service-control-release
+  cancel-in-progress: false
+
+jobs:
+  role:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure Kubernetes access
+        env:
+          KUBERNETES_SERVER: ${{ secrets.KUBERNETES_SERVER }}
+          KUBERNETES_TOKEN: ${{ secrets.KUBERNETES_TOKEN }}
+          KUBERNETES_CA: ${{ secrets.KUBERNETES_CA }}
+        run: |
+          set -eu
+          test -n "$KUBERNETES_SERVER"
+          test -n "$KUBERNETES_TOKEN"
+          if [ "$KUBERNETES_SERVER" != 'https://kubernetes.verdantflare.ai' ]; then
+            echo 'Refusing: Kubernetes API is not the current Center production endpoint' >&2
+            exit 1
+          fi
+          if [ -n "$KUBERNETES_CA" ]; then
+            ca_file="$RUNNER_TEMP/kubernetes-ca.crt"
+            printf '%s\n' "$KUBERNETES_CA" > "$ca_file"
+            kubectl config set-cluster verdantflare --server="$KUBERNETES_SERVER" --certificate-authority="$ca_file" --embed-certs=true
+          else
+            kubectl config set-cluster verdantflare --server="$KUBERNETES_SERVER"
+          fi
+          kubectl config set-credentials github-actions --token="$KUBERNETES_TOKEN"
+          kubectl config set-context verdantflare --cluster=verdantflare --user=github-actions --namespace=verdantflare
+
+      - name: Back up Control database before a grant
+        if: inputs.action == 'grant'
+        run: |
+          set -eu
+          pod="$(kubectl --context verdantflare -n verdantflare get pods -l app=postgres,owner=sc -o jsonpath='{.items[0].metadata.name}')"
+          test -n "$pod"
+          kubectl --context verdantflare -n verdantflare exec "$pod" -c postgres -- sh -ec '
+            umask 077
+            backup_dir=/var/lib/postgresql/data/backups
+            mkdir -p "$backup_dir"
+            backup_file="$backup_dir/control-skill-ops-role-$(date -u +%Y%m%dT%H%M%SZ).dump"
+            pg_dump -Fc -U "$POSTGRES_USER" -d control -f "$backup_file"
+            test -s "$backup_file"
+            pg_restore -l "$backup_file" >/dev/null
+            echo "Control database backup verified: $backup_file"
+          '
+
+      - name: Run skill-ops-role in Control
+        env:
+          ACTION: ${{ inputs.action }}
+          SUBJECT: ${{ inputs.subject }}
+          ORGANIZATION: ${{ inputs.organization }}
+        run: |
+          set -eu
+          printf '%s' "$SUBJECT" | grep -Eqx '[A-Za-z0-9_.:@-]{1,128}'
+          printf '%s' "$ORGANIZATION" | grep -Eqx '[A-Za-z0-9_.:@-]{1,128}'
+          kubectl --context verdantflare -n verdantflare exec deployment/verdantflare-service-control -c verdantflare-service-control -- \
+            /skill-ops-role -action "$ACTION" -subject "$SUBJECT" -organization "$ORGANIZATION"
