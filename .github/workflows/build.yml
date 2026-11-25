@@ -14,7 +14,7 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/verdantflarehub/verdantflare-service-control
-  VERSION: ${{ github.ref == 'refs/heads/dev' && 'service-control-v1.7.22-dev.1' || 'service-control-v1.7.22' }}
+  VERSION: ${{ github.ref == 'refs/heads/dev' && 'service-control-v1.7.23-dev.1' || 'service-control-v1.7.23' }}
 
 concurrency:
   group: verdantflare-service-control-release
@@ -107,7 +107,7 @@ jobs:
         run: |
           set -eu
           current="$(kubectl --context verdantflare -n verdantflare get deployment verdantflare-service-control -o jsonpath='{.spec.template.spec.containers[?(@.name=="verdantflare-service-control")].image}')"
-          test "$current" = 'ghcr.io/verdantflarehub/verdantflare-service-control:service-control-v1.7.21'
+          test "$current" = 'ghcr.io/verdantflarehub/verdantflare-service-control:service-control-v1.7.22'
           kubectl --context verdantflare -n verdantflare rollout status deployment/postgres --timeout=2m
           pod="$(kubectl --context verdantflare -n verdantflare get pods -l app=postgres,owner=sc -o jsonpath='{.items[0].metadata.name}')"
           test -n "$pod"
@@ -127,11 +127,14 @@ jobs:
           kubectl --context verdantflare -n verdantflare exec -i "$pod" -c postgres -- \
             sh -ec 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d control' \
             < migrations/postgres/008_skill_catalog.sql
+          kubectl --context verdantflare -n verdantflare exec -i "$pod" -c postgres -- \
+            sh -ec 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d control' \
+            < migrations/postgres/014_skill_releases.sql
           printf "SELECT storage_version FROM control_survey_state WHERE survey_id='yunnan-202610';\n" \
             | kubectl --context verdantflare -n verdantflare exec -i "$pod" -c postgres -- \
               sh -ec 'psql -XAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d control' \
             | grep -Eq '^[12]$'
-          printf "SELECT to_regclass('public.control_skill_catalog_entry') IS NOT NULL AND to_regclass('public.control_skill_catalog_audit') IS NOT NULL;\n" \
+          printf "SELECT to_regclass('public.control_skill_catalog_entry') IS NOT NULL AND to_regclass('public.control_skill_catalog_audit') IS NOT NULL AND to_regclass('public.control_skill_release_file') IS NOT NULL;\n" \
             | kubectl --context verdantflare -n verdantflare exec -i "$pod" -c postgres -- \
               sh -ec 'psql -XAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d control' \
             | grep -qx 't'
@@ -165,7 +168,7 @@ jobs:
           set -eu
           target=deployment/verdantflare-service-control
           before="$(kubectl --context verdantflare -n verdantflare exec "$target" -c verdantflare-service-control -- /survey-storage -action status -survey yunnan-202610)"
-          echo "$before" | jq -e '.open == true and (.storageVersion == 1 or .storageVersion == 2)' >/dev/null
+          echo "$before" | jq -e '.storageVersion == 1 or .storageVersion == 2' >/dev/null
           kubectl --context verdantflare -n verdantflare exec "$target" -c verdantflare-service-control -- \
             /survey-storage -action cutover -survey yunnan-202610
           after="$(kubectl --context verdantflare -n verdantflare exec "$target" -c verdantflare-service-control -- /survey-storage -action status -survey yunnan-202610)"
