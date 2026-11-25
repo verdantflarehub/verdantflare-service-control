@@ -8,7 +8,7 @@ on:
       action:
         description: image shows the deployed Control image; status shows roles; grant adds skill_ops_admin
         type: choice
-        options: [image, status, grant]
+        options: [image, status, grant, restore-hub-v1.7.24]
         default: status
       subject:
         description: exact Login subject (not needed for image)
@@ -68,6 +68,16 @@ jobs:
               | sort | tail -6
           done
 
+      - name: Roll Hub back to the hub-v1.7.24 ReplicaSet
+        if: inputs.action == 'restore-hub-v1.7.24'
+        run: |
+          set -eu
+          image="$(kubectl --context verdantflare -n verdantflare get rs -o json | jq -r '.items[] | select(.metadata.ownerReferences[0].name == "verdantflare-hub" and .metadata.annotations["deployment.kubernetes.io/revision"] == "15") | .spec.template.spec.containers[0].image')"
+          test "$image" = 'ghcr.io/verdantflarehub/verdantflare-hub:hub-v1.7.24'
+          kubectl --context verdantflare -n verdantflare rollout undo deployment/verdantflare-hub --to-revision=15
+          kubectl --context verdantflare -n verdantflare rollout status deployment/verdantflare-hub --timeout=5m
+          kubectl --context verdantflare -n verdantflare get deployment verdantflare-hub -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+
       - name: Back up Control database before a grant
         if: inputs.action == 'grant'
         run: |
@@ -86,7 +96,7 @@ jobs:
           '
 
       - name: Run skill-ops-role in Control
-        if: inputs.action != 'image'
+        if: inputs.action == 'status' || inputs.action == 'grant'
         env:
           ACTION: ${{ inputs.action }}
           SUBJECT: ${{ inputs.subject }}
