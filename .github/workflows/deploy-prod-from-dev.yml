@@ -1,0 +1,138 @@
+# Manually build the current dev branch and deploy it to Center production.
+# Refuses unless production still runs the expected image; rolls back if the
+# new ReplicaSet does not become ready. Does not modify the ghcr-pull secret.
+name: deploy-prod-from-dev
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: new image tag, e.g. service-control-v1.7.30-fi
+        required: true
+        type: string
+      expected_current:
+        description: full image currently in production, e.g. ghcr.io/verdantflarehub/verdantflare-service-control:service-control-v1.7.29-fi
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: verdantflare-service-control-release
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/verdantflarehub/verdantflare-service-control
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the dev branch and a fresh tag name
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          test "$GITHUB_REF" = refs/heads/dev
+          printf '%s' "$VERSION" | grep -Eqx '[a-z-]+v[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9.]+)?'
+
+      - name: Checkout dev
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Refuse an existing image tag
+        run: '! docker buildx imagetools inspect "${{ env.IMAGE_NAME }}:${{ inputs.version }}" >/dev/null 2>&1'
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ env.IMAGE_NAME }}:${{ inputs.version }}
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure Kubernetes access
+        env:
+          KUBERNETES_SERVER: ${{ secrets.KUBERNETES_SERVER }}
+          KUBERNETES_TOKEN: ${{ secrets.KUBERNETES_TOKEN }}
+          KUBERNETES_CA: ${{ secrets.KUBERNETES_CA }}
+        run: |
+          set -eu
+          test -n "$KUBERNETES_SERVER"
+          test -n "$KUBERNETES_TOKEN"
+          if [ "$KUBERNETES_SERVER" != 'https://kubernetes.verdantflare.ai' ]; then
+            echo 'Refusing: Kubernetes API is not the current Center production endpoint' >&2
+            exit 1
+          fi
+          if [ -n "$KUBERNETES_CA" ]; then
+            ca_file="$RUNNER_TEMP/kubernetes-ca.crt"
+            printf '%s\n' "$KUBERNETES_CA" > "$ca_file"
+            kubectl config set-cluster verdantflare --server="$KUBERNETES_SERVER" --certificate-authority="$ca_file" --embed-certs=true
+          else
+            kubectl config set-cluster verdantflare --server="$KUBERNETES_SERVER"
+          fi
+          kubectl config set-credentials github-actions --token="$KUBERNETES_TOKEN"
+          kubectl config set-context verdantflare --cluster=verdantflare --user=github-actions --namespace=verdantflare
+
+      - name: Refuse unless production runs the expected image
+        env:
+          EXPECTED: ${{ inputs.expected_current }}
+        run: |
+          set -eu
+          current="$(kubectl --context verdantflare -n verdantflare get deployment verdantflare-service-control -o jsonpath='{.spec.template.spec.containers[?(@.name=="verdantflare-service-control")].image}')"
+          echo "current=$current"
+          test "$current" = "$EXPECTED"
+          kubectl --context verdantflare -n verdantflare rollout status deployment/verdantflare-service-control --timeout=60s
+      - name: Back up Control database
+        run: |
+          set -eu
+          pod="$(kubectl --context verdantflare -n verdantflare get pods -l app=postgres,owner=sc -o jsonpath='{.items[0].metadata.name}')"
+          test -n "$pod"
+          kubectl --context verdantflare -n verdantflare exec "$pod" -c postgres -- sh -ec '
+            umask 077
+            backup_dir=/var/lib/postgresql/data/backups
+            mkdir -p "$backup_dir"
+            backup_file="$backup_dir/control-deploy-$(date -u +%Y%m%dT%H%M%SZ).dump"
+            pg_dump -Fc -U "$POSTGRES_USER" -d control -f "$backup_file"
+            test -s "$backup_file"
+            pg_restore -l "$backup_file" >/dev/null
+            echo "Control database backup verified: $backup_file"
+          '
+
+      - name: Switch image, roll back if it does not become ready
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          kubectl --context verdantflare -n verdantflare set image deployment/verdantflare-service-control verdantflare-service-control="$IMAGE_NAME:$VERSION"
+          if ! kubectl --context verdantflare -n verdantflare rollout status deployment/verdantflare-service-control --timeout=5m; then
+            echo 'New version did not become ready; rolling back' >&2
+            kubectl --context verdantflare -n verdantflare rollout undo deployment/verdantflare-service-control
+            kubectl --context verdantflare -n verdantflare rollout status deployment/verdantflare-service-control --timeout=5m
+            exit 1
+          fi
+          kubectl --context verdantflare -n verdantflare get deployment verdantflare-service-control -o jsonpath='{.spec.template.spec.containers[?(@.name=="verdantflare-service-control")].image}{"\n"}'
