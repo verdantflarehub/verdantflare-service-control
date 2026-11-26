@@ -8,7 +8,7 @@ on:
       action:
         description: image shows the deployed Control image; status shows roles; grant adds skill_ops_admin
         type: choice
-        options: [image, find, status, grant, restore-hub-v1.7.24]
+        options: [image, logs, find, status, grant, restore-hub-v1.7.24]
         default: status
       email:
         description: login email to look up (find only)
@@ -74,6 +74,17 @@ jobs:
           echo "== recent events for Control pods"
           kubectl --context verdantflare -n verdantflare get events --sort-by=.lastTimestamp -o json \
             | jq -r '.items[] | select(.involvedObject.name | startswith("verdantflare-service-control")) | [.lastTimestamp, .involvedObject.name, .reason, (.message|.[0:300])] | @tsv' | tail -25
+
+      - name: Show recent skill-release request logs (read-only)
+        if: inputs.action == 'logs'
+        run: |
+          set -u
+          echo "== Control: failures and skill-release requests, last 3h"
+          kubectl --context verdantflare -n verdantflare logs deployment/verdantflare-service-control -c verdantflare-service-control --since=3h --all-containers=false \
+            | grep -E 'request failed|skill-release|skill_release|panic|level=ERROR' | tail -60 || true
+          echo "== Hub nginx: skill-release requests and errors, last 3h"
+          kubectl --context verdantflare -n verdantflare logs deployment/verdantflare-hub --since=3h \
+            | grep -E 'skill-release|\[error\]|\[crit\]' | sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/x.x.x.x/g' | tail -40 || true
 
       - name: Roll Hub back to the hub-v1.7.24 ReplicaSet
         if: inputs.action == 'restore-hub-v1.7.24'
