@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -15,6 +16,9 @@ import (
 const mcpTokenPrefix = "vfhub_"
 const MCPTokenPurposeApp = "app_publish"
 const MCPTokenPurposeModel = "model_publish"
+
+// MCPTokenPurposeSkill tokens work only on the skill publishing MCP entry.
+const MCPTokenPurposeSkill = "skill_publish"
 
 type CreateMCPTokenInput struct {
 	Name          string `json:"name"`
@@ -35,12 +39,25 @@ func mcpTokenPurpose(value string) (string, string, error) {
 	if value == MCPTokenPurposeModel {
 		return MCPTokenPurposeModel, "api_ops_admin", nil
 	}
+	if value == MCPTokenPurposeSkill {
+		return MCPTokenPurposeSkill, "skill_ops_admin", nil
+	}
 	return "", "", domain.NewError(400, "mcp_token_purpose_invalid", "不支持的 MCP 令牌用途")
 }
 
 type CreateMCPTokenResult struct {
 	domain.MCPToken
 	Secret string `json:"secret"`
+}
+
+// requireMCPPurposeRole checks the role a token purpose needs. Skill tokens
+// also need an unfrozen organization, like the skill operations page.
+func (s *Service) requireMCPPurposeRole(ctx context.Context, subject, purpose, role string) error {
+	if purpose == MCPTokenPurposeSkill {
+		_, err := s.requireSkillOperator(ctx, subject)
+		return err
+	}
+	return s.requireOperationsRole(ctx, subject, role)
 }
 
 // MCP tokens reuse the Hub operations role: whoever may publish from the Hub
@@ -50,7 +67,7 @@ func (s *Service) ListMCPTokens(ctx context.Context, subject, purposeInput strin
 	if err != nil {
 		return nil, err
 	}
-	if err := s.requireOperationsRole(ctx, subject, role); err != nil {
+	if err := s.requireMCPPurposeRole(ctx, subject, purpose, role); err != nil {
 		return nil, err
 	}
 	tokens, err := s.repository.ListMCPTokens(ctx, subject)
@@ -73,7 +90,7 @@ func (s *Service) CreateMCPToken(ctx context.Context, subject string, input Crea
 	if err != nil {
 		return CreateMCPTokenResult{}, err
 	}
-	if err := s.requireOperationsRole(ctx, subject, role); err != nil {
+	if err := s.requireMCPPurposeRole(ctx, subject, purpose, role); err != nil {
 		return CreateMCPTokenResult{}, err
 	}
 	name := strings.TrimSpace(input.Name)
@@ -106,10 +123,11 @@ func (s *Service) RevokeMCPToken(ctx context.Context, subject, tokenID string) e
 	return s.repository.RevokeMCPToken(ctx, subject, tokenID, time.Now().UTC())
 }
 
-// AuthenticateMCPToken resolves a bearer secret to its Login subject. Role
-// checks still run on every business call, so a revoked role disables the
-// token immediately.
-func (s *Service) AuthenticateMCPToken(ctx context.Context, secret string) (MCPIdentity, error) {
+// AuthenticateMCPToken resolves a bearer secret to its Login subject for one
+// MCP entry: a token whose purpose is not among allowed is refused before any
+// tool runs. Role checks still run on every business call, so a revoked role
+// disables the token immediately.
+func (s *Service) AuthenticateMCPToken(ctx context.Context, secret string, allowed ...string) (MCPIdentity, error) {
 	invalid := domain.NewError(401, "mcp_token_invalid", "MCP 访问令牌无效、已过期或已吊销")
 	if !strings.HasPrefix(secret, mcpTokenPrefix) || len(secret) > 128 {
 		return MCPIdentity{}, invalid
@@ -122,7 +140,10 @@ func (s *Service) AuthenticateMCPToken(ctx context.Context, secret string) (MCPI
 	if err != nil {
 		return MCPIdentity{}, invalid
 	}
-	if err := s.requireOperationsRole(ctx, token.LoginSubject, role); err != nil {
+	if !slices.Contains(allowed, purpose) {
+		return MCPIdentity{}, domain.NewError(403, "mcp_token_wrong_entry", "该令牌用途不能用于此 MCP 入口")
+	}
+	if err := s.requireMCPPurposeRole(ctx, token.LoginSubject, purpose, role); err != nil {
 		return MCPIdentity{}, err
 	}
 	now := time.Now().UTC()

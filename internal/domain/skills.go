@@ -33,17 +33,18 @@ type SkillCatalogAuditEvent struct {
 // SkillRelease is one fixed set of skill packages and guides stored by Control.
 // Status moves candidate -> published -> withdrawn; bytes never change.
 type SkillRelease struct {
-	ReleaseID      string             `json:"releaseId"`
-	Stage          string             `json:"stage"`
-	Authentication string             `json:"authentication"`
-	ManifestSHA256 string             `json:"manifestSha256"`
-	ArchiveSHA256  string             `json:"archiveSha256"`
-	Status         string             `json:"status"`
-	Files          []SkillReleaseFile `json:"files"`
-	CreatedBy      string             `json:"createdBy,omitempty"`
-	CreatedAt      time.Time          `json:"createdAt"`
-	PublishedAt    *time.Time         `json:"publishedAt"`
-	WithdrawnAt    *time.Time         `json:"withdrawnAt"`
+	ReleaseID      string              `json:"releaseId"`
+	Stage          string              `json:"stage"`
+	Authentication string              `json:"authentication"`
+	ManifestSHA256 string              `json:"manifestSha256"`
+	ArchiveSHA256  string              `json:"archiveSha256"`
+	Status         string              `json:"status"`
+	Source         *SkillReleaseSource `json:"source"`
+	Files          []SkillReleaseFile  `json:"files"`
+	CreatedBy      string              `json:"createdBy,omitempty"`
+	CreatedAt      time.Time           `json:"createdAt"`
+	PublishedAt    *time.Time          `json:"publishedAt"`
+	WithdrawnAt    *time.Time          `json:"withdrawnAt"`
 }
 
 type SkillReleaseFile struct {
@@ -56,11 +57,37 @@ type SkillReleaseFile struct {
 	Data     []byte   `json:"-"`
 }
 
+// SkillReleaseSource is the receipt of where Control fetched a release from:
+// one workflow-built GitHub Release asset of the skills repository.
+type SkillReleaseSource struct {
+	Repository      string    `json:"repository"`
+	Tag             string    `json:"tag"`
+	Commit          string    `json:"commit"`
+	GitHubReleaseID int64     `json:"githubReleaseId"`
+	AssetID         int64     `json:"assetId"`
+	Uploader        string    `json:"uploader"`
+	Size            int64     `json:"size"`
+	SHA256          string    `json:"sha256"`
+	FetchedAt       time.Time `json:"fetchedAt"`
+}
+
+// SkillReleaseActor says who changed a release and through which entry.
+// TokenID and Tool are set only for calls from the skill publishing MCP.
+type SkillReleaseActor struct {
+	Subject        string
+	OrganizationID string
+	TokenID        string
+	Tool           string
+}
+
 type SkillReleaseAuditEvent struct {
 	ReleaseID      string    `json:"releaseId"`
 	Action         string    `json:"action"`
 	FileName       string    `json:"fileName,omitempty"`
 	ActorSubject   string    `json:"actorSubject"`
 	OrganizationID string    `json:"organizationId"`
+	TokenID        string    `json:"tokenId,omitempty"`
+	Tool           string    `json:"tool,omitempty"`
+	Reason         string    `json:"reason,omitempty"`
 	CreatedAt      time.Time `json:"createdAt"`
 }

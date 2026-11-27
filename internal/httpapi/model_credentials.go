@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/verdantflarehub/verdantflare-service-control/internal/control"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
 )
 
@@ -34,7 +35,7 @@ func (s *Server) uploadModelCredential(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, domain.NewError(401, "mcp_token_required", "缺少 Hub MCP 访问令牌"))
 		return
 	}
-	identity, err := s.service.AuthenticateMCPToken(r.Context(), strings.TrimSpace(secret))
+	identity, err := s.service.AuthenticateMCPToken(r.Context(), strings.TrimSpace(secret), control.MCPTokenPurposeApp, control.MCPTokenPurposeModel)
 	if err != nil {
 		s.writeError(w, r, err)
 		return

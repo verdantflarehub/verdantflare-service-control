@@ -1,74 +1,89 @@
 package httpapi
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 
+	"github.com/verdantflarehub/verdantflare-service-control/internal/control"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/domain"
 )
 
-const maxSkillReleaseUploadBytes = 32 << 20
-
-func invalidSkillReleaseUpload() error {
-	return domain.NewError(400, "skill_release_upload_invalid", "请以 multipart 字段 archive 上传一个 .zip 发行包")
-}
-
-func (s *Server) uploadSkillRelease(w http.ResponseWriter, r *http.Request) {
-	subject, ok := s.subject(w, r)
-	if !ok {
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxSkillReleaseUploadBytes+(16<<10))
-	reader, err := r.MultipartReader()
-	if err != nil {
-		s.writeError(w, r, invalidSkillReleaseUpload())
-		return
-	}
-	part, err := reader.NextPart()
-	if err != nil || part.FormName() != "archive" || !strings.HasSuffix(strings.ToLower(part.FileName()), ".zip") {
-		s.writeError(w, r, invalidSkillReleaseUpload())
-		return
-	}
-	archive, err := io.ReadAll(part)
-	if err != nil || len(archive) == 0 || len(archive) > maxSkillReleaseUploadBytes {
-		s.writeError(w, r, invalidSkillReleaseUpload())
-		return
-	}
-	if next, err := reader.NextPart(); err != io.EOF || next != nil {
-		s.writeError(w, r, invalidSkillReleaseUpload())
-		return
-	}
-	release, created, err := s.service.UploadSkillRelease(r.Context(), subject, archive)
-	status := http.StatusOK
-	if created {
-		status = http.StatusCreated
-	}
-	w.Header().Set("Cache-Control", "private, no-store")
-	s.respond(w, r, release, err, status)
-}
-
+// Releases are registered only through the skill publishing MCP; the page
+// lists, inspects, publishes and withdraws them through the same services.
 func (s *Server) listSkillReleases(w http.ResponseWriter, r *http.Request) {
 	subject, ok := s.subject(w, r)
 	if !ok {
 		return
 	}
-	items, err := s.service.ListManagedSkillReleases(r.Context(), subject)
+	list, err := s.service.ListManagedSkillReleases(r.Context(), subject)
 	w.Header().Set("Cache-Control", "private, no-store")
-	s.respond(w, r, map[string]any{"items": items}, err, http.StatusOK)
+	s.respond(w, r, list, err, http.StatusOK)
 }
 
-func (s *Server) setSkillReleaseStatus(status string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		subject, ok := s.subject(w, r)
-		if !ok {
-			return
-		}
-		release, err := s.service.SetSkillReleaseStatus(r.Context(), subject, r.PathValue("releaseID"), status)
-		w.Header().Set("Cache-Control", "private, no-store")
-		s.respond(w, r, release, err, http.StatusOK)
+func (s *Server) getSkillRelease(w http.ResponseWriter, r *http.Request) {
+	subject, ok := s.subject(w, r)
+	if !ok {
+		return
 	}
+	detail, err := s.service.SkillReleaseDetailFor(r.Context(), subject, r.PathValue("releaseID"))
+	w.Header().Set("Cache-Control", "private, no-store")
+	s.respond(w, r, detail, err, http.StatusOK)
+}
+
+type skillReleaseChange struct {
+	ExpectedArchiveSHA256 string `json:"expectedArchiveSha256"`
+	Reason                string `json:"reason"`
+}
+
+// readSkillReleaseChange accepts an empty body or a small JSON object.
+func readSkillReleaseChange(r *http.Request) (skillReleaseChange, error) {
+	var change skillReleaseChange
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4097))
+	if err != nil || len(body) > 4096 {
+		return change, domain.NewError(400, "INVALID_REQUEST", "请求体无效")
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return change, nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&change); err != nil {
+		return change, domain.NewError(400, "INVALID_REQUEST", "请求体须为 JSON 对象")
+	}
+	return change, nil
+}
+
+func (s *Server) publishSkillRelease(w http.ResponseWriter, r *http.Request) {
+	subject, ok := s.subject(w, r)
+	if !ok {
+		return
+	}
+	change, err := readSkillReleaseChange(r)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	release, err := s.service.PublishSkillRelease(r.Context(), control.SkillActor{Subject: subject}, r.PathValue("releaseID"), change.ExpectedArchiveSHA256)
+	w.Header().Set("Cache-Control", "private, no-store")
+	s.respond(w, r, release, err, http.StatusOK)
+}
+
+func (s *Server) withdrawSkillRelease(w http.ResponseWriter, r *http.Request) {
+	subject, ok := s.subject(w, r)
+	if !ok {
+		return
+	}
+	change, err := readSkillReleaseChange(r)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	release, err := s.service.WithdrawSkillRelease(r.Context(), control.SkillActor{Subject: subject}, r.PathValue("releaseID"), change.ExpectedArchiveSHA256, change.Reason)
+	w.Header().Set("Cache-Control", "private, no-store")
+	s.respond(w, r, release, err, http.StatusOK)
 }
 
 func (s *Server) currentSkillRelease(w http.ResponseWriter, r *http.Request) {

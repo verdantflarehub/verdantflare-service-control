@@ -70,6 +70,25 @@ func (s *Server) getManagedSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entry)
 }
 
+func (s *Server) createManagedSkill(w http.ResponseWriter, r *http.Request) {
+	subject, ok := s.subject(w, r)
+	if !ok {
+		return
+	}
+	var input control.CreateSkillEntryInput
+	if !s.decode(w, r, &input) {
+		return
+	}
+	entry, err := s.service.CreateManagedSkillEntry(r.Context(), subject, input)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	setSkillETag(w, entry)
+	writeJSON(w, http.StatusCreated, entry)
+}
+
 func (s *Server) patchManagedSkill(w http.ResponseWriter, r *http.Request) {
 	subject, ok := s.subject(w, r)
 	if !ok {

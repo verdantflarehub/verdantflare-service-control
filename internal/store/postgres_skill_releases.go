@@ -46,6 +46,26 @@ CREATE TABLE IF NOT EXISTS control_skill_release_audit (
 );
 CREATE INDEX IF NOT EXISTS control_skill_release_audit_release
     ON control_skill_release_audit (release_id, event_id DESC);
+` + skillReleaseSourceSchemaSQL
+
+// skillReleaseSourceSchemaSQL upgrades the 014 tables in place for the skill
+// publishing MCP (migration 015 holds the same statements): a source receipt
+// per release, the token and tool behind each change, and the register action.
+const skillReleaseSourceSchemaSQL = `
+ALTER TABLE control_skill_release ADD COLUMN IF NOT EXISTS source JSONB;
+ALTER TABLE control_skill_release_audit ADD COLUMN IF NOT EXISTS token_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE control_skill_release_audit ADD COLUMN IF NOT EXISTS tool TEXT NOT NULL DEFAULT '';
+ALTER TABLE control_skill_release_audit ADD COLUMN IF NOT EXISTS reason TEXT NOT NULL DEFAULT '';
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'control_skill_release_audit_action_v2') THEN
+        ALTER TABLE control_skill_release_audit DROP CONSTRAINT IF EXISTS control_skill_release_audit_action_check;
+        ALTER TABLE control_skill_release_audit ADD CONSTRAINT control_skill_release_audit_action_v2
+            CHECK (action IN ('upload', 'register', 'publish', 'withdraw', 'download'));
+    END IF;
+EXCEPTION WHEN duplicate_object THEN
+    NULL; -- another replica upgraded the constraint first
+END $$;
 `
 
 func ensureSkillReleaseSchema(ctx context.Context, db *sql.DB) error {
@@ -53,11 +73,18 @@ func ensureSkillReleaseSchema(ctx context.Context, db *sql.DB) error {
 	return err
 }
 
-const skillReleaseColumns = `release_id,stage,authentication,manifest_sha256,archive_sha256,status,created_by,created_at,published_at,withdrawn_at`
+const skillReleaseColumns = `release_id,stage,authentication,manifest_sha256,archive_sha256,status,source,created_by,created_at,published_at,withdrawn_at`
 
 func scanSkillRelease(row skillScanner) (domain.SkillRelease, error) {
 	var r domain.SkillRelease
-	err := row.Scan(&r.ReleaseID, &r.Stage, &r.Authentication, &r.ManifestSHA256, &r.ArchiveSHA256, &r.Status, &r.CreatedBy, &r.CreatedAt, &r.PublishedAt, &r.WithdrawnAt)
+	var source []byte
+	err := row.Scan(&r.ReleaseID, &r.Stage, &r.Authentication, &r.ManifestSHA256, &r.ArchiveSHA256, &r.Status, &source, &r.CreatedBy, &r.CreatedAt, &r.PublishedAt, &r.WithdrawnAt)
+	if err == nil && len(source) > 0 {
+		r.Source = &domain.SkillReleaseSource{}
+		if err := json.Unmarshal(source, r.Source); err != nil {
+			return r, fmt.Errorf("read skill release source: %w", err)
+		}
+	}
 	return r, err
 }
 
@@ -108,16 +135,24 @@ func (p *Postgres) skillRelease(ctx context.Context, q interface {
 	return release, err
 }
 
-func (p *Postgres) CreateSkillRelease(ctx context.Context, release domain.SkillRelease, actor, organizationID string) (domain.SkillRelease, bool, error) {
+func (p *Postgres) CreateSkillRelease(ctx context.Context, release domain.SkillRelease, actor domain.SkillReleaseActor) (domain.SkillRelease, bool, error) {
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.SkillRelease{}, false, err
 	}
 	defer tx.Rollback()
+	var source any
+	if release.Source != nil {
+		encoded, err := json.Marshal(release.Source)
+		if err != nil {
+			return domain.SkillRelease{}, false, err
+		}
+		source = encoded
+	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO control_skill_release
-		(release_id,stage,authentication,manifest_sha256,archive_sha256,status,created_by)
-		VALUES ($1,$2,$3,$4,$5,'candidate',$6) ON CONFLICT (release_id) DO NOTHING`,
-		release.ReleaseID, release.Stage, release.Authentication, release.ManifestSHA256, release.ArchiveSHA256, actor)
+		(release_id,stage,authentication,manifest_sha256,archive_sha256,status,source,created_by)
+		VALUES ($1,$2,$3,$4,$5,'candidate',$6,$7) ON CONFLICT (release_id) DO NOTHING`,
+		release.ReleaseID, release.Stage, release.Authentication, release.ManifestSHA256, release.ArchiveSHA256, source, actor.Subject)
 	if err != nil {
 		return domain.SkillRelease{}, false, fmt.Errorf("create skill release: %w", err)
 	}
@@ -139,8 +174,7 @@ func (p *Postgres) CreateSkillRelease(ctx context.Context, release domain.SkillR
 			return domain.SkillRelease{}, false, fmt.Errorf("store skill release file: %w", err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO control_skill_release_audit (release_id,action,actor_subject,organization_id)
-		VALUES ($1,'upload',$2,$3)`, release.ReleaseID, actor, organizationID); err != nil {
+	if err := insertSkillReleaseAudit(ctx, tx, release.ReleaseID, "register", "", actor); err != nil {
 		return domain.SkillRelease{}, false, err
 	}
 	created, err := p.skillRelease(ctx, tx, release.ReleaseID, false)
@@ -176,7 +210,39 @@ func (p *Postgres) ListSkillReleases(ctx context.Context) ([]domain.SkillRelease
 	return items, nil
 }
 
-func (p *Postgres) SetSkillReleaseStatus(ctx context.Context, id, status, actor, organizationID string) (domain.SkillRelease, error) {
+func (p *Postgres) GetSkillRelease(ctx context.Context, id string) (domain.SkillRelease, error) {
+	return p.skillRelease(ctx, p.db, id, false)
+}
+
+type skillExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func insertSkillReleaseAudit(ctx context.Context, q skillExecer, id, action, reason string, actor domain.SkillReleaseActor) error {
+	_, err := q.ExecContext(ctx, `INSERT INTO control_skill_release_audit (release_id,action,actor_subject,organization_id,token_id,tool,reason)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)`, id, action, actor.Subject, actor.OrganizationID, actor.TokenID, actor.Tool, reason)
+	return err
+}
+
+func (p *Postgres) SkillReleaseAudit(ctx context.Context, id string, limit int) ([]domain.SkillReleaseAuditEvent, error) {
+	rows, err := p.db.QueryContext(ctx, `SELECT release_id,action,file_name,actor_subject,organization_id,token_id,tool,reason,created_at
+		FROM control_skill_release_audit WHERE release_id=$1 AND action <> 'download' ORDER BY event_id DESC LIMIT $2`, id, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list skill release audit: %w", err)
+	}
+	defer rows.Close()
+	events := make([]domain.SkillReleaseAuditEvent, 0)
+	for rows.Next() {
+		var e domain.SkillReleaseAuditEvent
+		if err := rows.Scan(&e.ReleaseID, &e.Action, &e.FileName, &e.ActorSubject, &e.OrganizationID, &e.TokenID, &e.Tool, &e.Reason, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
+func (p *Postgres) SetSkillReleaseStatus(ctx context.Context, id, status, reason string, actor domain.SkillReleaseActor) (domain.SkillRelease, error) {
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.SkillRelease{}, err
@@ -196,8 +262,7 @@ func (p *Postgres) SetSkillReleaseStatus(ctx context.Context, id, status, actor,
 	if _, err := tx.ExecContext(ctx, `UPDATE control_skill_release SET status=$2,`+column+`=NOW() WHERE release_id=$1`, id, status); err != nil {
 		return domain.SkillRelease{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO control_skill_release_audit (release_id,action,actor_subject,organization_id)
-		VALUES ($1,$2,$3,$4)`, id, actionFor(status), actor, organizationID); err != nil {
+	if err := insertSkillReleaseAudit(ctx, tx, id, actionFor(status), reason, actor); err != nil {
 		return domain.SkillRelease{}, err
 	}
 	updated, err := p.skillRelease(ctx, tx, id, false)

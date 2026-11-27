@@ -25,7 +25,11 @@ type Input struct {
 	Authentication string
 	ManifestSHA256 string
 	ArchiveSHA256  string
-	Files          []File
+	// SourceCommit and SourceDirty come from the source lock; they say which
+	// skills repository commit the packages were built from.
+	SourceCommit string
+	SourceDirty  bool
+	Files        []File
 }
 
 type guideManifest struct {
@@ -68,6 +72,17 @@ func ParseHandoffInput(data []byte) (Input, error) {
 	lockBytes, err := readEntry(outer, "candidate/source-lock.json")
 	if err != nil || hash(lockBytes) != c.SourceLockSHA256 {
 		return in, errors.New("skill input: source lock digest mismatch")
+	}
+	var lock struct {
+		SourceRepository *struct {
+			Commit string `json:"commit"`
+			Dirty  *bool  `json:"dirty"`
+		} `json:"source_repository"`
+	}
+	_ = json.Unmarshal(lockBytes, &lock)
+	sourceCommit, sourceDirty := "", true
+	if lock.SourceRepository != nil && lock.SourceRepository.Dirty != nil {
+		sourceCommit, sourceDirty = lock.SourceRepository.Commit, *lock.SourceRepository.Dirty
 	}
 	if len(c.Packages) != len(skillIDs) {
 		return in, errors.New("skill input: expected exactly 11 skills")
@@ -121,8 +136,11 @@ func ParseHandoffInput(data []byte) (Input, error) {
 			SHA256: p.Artifact.SHA256, Size: int64(len(content)), Data: content})
 	}
 	return Input{ReleaseID: c.ReleaseID, Stage: c.ReleaseStage, Authentication: c.Authentication,
-		ManifestSHA256: manifestDigest, ArchiveSHA256: hash(data), Files: files}, nil
+		ManifestSHA256: manifestDigest, ArchiveSHA256: hash(data), SourceCommit: sourceCommit, SourceDirty: sourceDirty, Files: files}, nil
 }
+
+// ValidReleaseID reports whether id is an acceptable skill release id.
+func ValidReleaseID(id string) bool { return validReleaseID(id) }
 
 func validReleaseID(id string) bool {
 	if id == "" || len(id) > 64 {

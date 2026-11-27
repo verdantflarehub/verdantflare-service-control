@@ -35,6 +35,9 @@ type Config struct {
 	ChartRegistryHost           string
 	ChartRegistryInternalURL    string
 	RequiredInstallGrantApps    []string
+	SkillSourceAPIURL           string
+	SkillSourceRepository       string
+	SkillSourceToken            string
 	StationOrganizationBindings []StationOrganizationBinding
 	ReadTimeout                 time.Duration
 	WriteTimeout                time.Duration
@@ -115,6 +118,14 @@ func Load() (Config, error) {
 	chartRegistryHost := env("CONTROL_CHART_REGISTRY_HOST", "registry.verdantflare.ai")
 	chartRegistryInternalURL := env("CONTROL_CHART_REGISTRY_INTERNAL_URL", "https://"+chartRegistryHost)
 	requiredInstallGrantApps := splitCSV(os.Getenv("CONTROL_INSTALL_GRANT_REQUIRED_APPS"))
+	// Skill releases are registered only from this repository's workflow-built
+	// GitHub Releases. The repository is public, so the read-only token is
+	// optional and only raises GitHub's rate limit.
+	skillSourceAPIURL := env("CONTROL_SKILL_SOURCE_API_URL", "https://api.github.com")
+	skillSourceRepository := env("CONTROL_SKILL_SOURCE_REPOSITORY", "verdantflarehub/verdantflare-skills")
+	if environment == "production" && (skillSourceAPIURL != "https://api.github.com" || skillSourceRepository != "verdantflarehub/verdantflare-skills") {
+		return Config{}, fmt.Errorf("CONTROL_SKILL_SOURCE_API_URL and CONTROL_SKILL_SOURCE_REPOSITORY cannot be changed in production")
+	}
 	var stationBindings []StationOrganizationBinding
 	if raw := strings.TrimSpace(os.Getenv("CONTROL_STATION_ORGANIZATION_BINDINGS")); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &stationBindings); err != nil {
@@ -163,6 +174,9 @@ func Load() (Config, error) {
 		ChartRegistryHost:           chartRegistryHost,
 		ChartRegistryInternalURL:    chartRegistryInternalURL,
 		RequiredInstallGrantApps:    requiredInstallGrantApps,
+		SkillSourceAPIURL:           skillSourceAPIURL,
+		SkillSourceRepository:       skillSourceRepository,
+		SkillSourceToken:            strings.TrimSpace(os.Getenv("CONTROL_SKILL_SOURCE_TOKEN")),
 		StationOrganizationBindings: stationBindings,
 		ReadTimeout:                 10 * time.Second,
 		WriteTimeout:                15 * time.Second,

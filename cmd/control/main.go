@@ -15,6 +15,7 @@ import (
 	"github.com/verdantflarehub/verdantflare-service-control/internal/control"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/gateway"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/httpapi"
+	"github.com/verdantflarehub/verdantflare-service-control/internal/skillsource"
 	"github.com/verdantflarehub/verdantflare-service-control/internal/store"
 )
 
@@ -67,6 +68,12 @@ func main() {
 	}
 	service := control.NewService(repository, modelGateway)
 	service.SetRequiredInstallGrantApps(configuration.RequiredInstallGrantApps)
+	skillSource, err := skillsource.New(configuration.SkillSourceAPIURL, configuration.SkillSourceRepository, configuration.SkillSourceToken)
+	if err != nil {
+		logger.Error("invalid skill source configuration", "error", err)
+		os.Exit(1)
+	}
+	service.SetSkillSource(skillSource)
 	if configuration.LoginDirectoryBaseURL != "" {
 		directory, err := gateway.NewLoginDirectoryClient(configuration.LoginDirectoryBaseURL, configuration.LoginDirectoryToken)
 		if err != nil {

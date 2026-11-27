@@ -66,27 +66,48 @@ func hubMCPFailure(err error, purpose string) (*domain.Error, bool) {
 
 // hubMCP serves the Hub Market MCP. The bearer is a Hub MCP token; Login
 // session headers and the development subject are never consulted here.
+// mcpEndpoint is one MCP server: its own token purposes, tool list and body
+// limit. Each endpoint authenticates with Bearer only and ignores any Hub
+// session headers, even when reached through the /api/control/ prefix.
+type mcpEndpoint struct {
+	realm      string
+	serverName string
+	purposes   []string
+	maxBody    int64
+	maxBodyMsg string
+	tools      func(purpose string) []hubMCPTool
+	call       func(r *http.Request, identity control.MCPIdentity, name string, arguments json.RawMessage) (any, error)
+	failure    func(err error, purpose string) (*domain.Error, bool)
+}
+
 func (s *Server) hubMCP(w http.ResponseWriter, r *http.Request) {
+	s.serveMCP(w, r, mcpEndpoint{realm: "hub-mcp", serverName: "verdantflare-hub-market",
+		purposes: []string{control.MCPTokenPurposeApp, control.MCPTokenPurposeModel},
+		maxBody:  maxPublicationBodyBytes, maxBodyMsg: "MCP 请求体超过 5 MiB",
+		tools: hubMCPTools, call: s.callHubMCPTool, failure: hubMCPFailure})
+}
+
+func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request, endpoint mcpEndpoint) {
 	secret, found := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !found || strings.TrimSpace(secret) == "" {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="hub-mcp"`)
-		s.writeError(w, r, domain.NewError(401, "mcp_token_required", "缺少 Hub MCP 访问令牌"))
+		w.Header().Set("WWW-Authenticate", `Bearer realm="`+endpoint.realm+`"`)
+		s.writeError(w, r, domain.NewError(401, "mcp_token_required", "缺少 MCP 访问令牌"))
 		return
 	}
-	identity, err := s.service.AuthenticateMCPToken(r.Context(), strings.TrimSpace(secret))
+	identity, err := s.service.AuthenticateMCPToken(r.Context(), strings.TrimSpace(secret), endpoint.purposes...)
 	if err != nil {
 		var failure *domain.Error
 		if errors.As(err, &failure) && failure.Status == http.StatusUnauthorized {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="hub-mcp", error="invalid_token"`)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+endpoint.realm+`", error="invalid_token"`)
 		}
 		s.writeError(w, r, err)
 		return
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPublicationBodyBytes))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, endpoint.maxBody))
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			s.writeError(w, r, domain.NewError(413, "REQUEST_TOO_LARGE", "MCP 请求体超过 5 MiB"))
+			s.writeError(w, r, domain.NewError(413, "REQUEST_TOO_LARGE", endpoint.maxBodyMsg))
 		} else {
 			s.writeError(w, r, domain.NewError(400, "INVALID_REQUEST", "MCP 请求体读取失败"))
 		}
@@ -115,11 +136,11 @@ func (s *Server) hubMCP(w http.ResponseWriter, r *http.Request) {
 			params.ProtocolVersion = "2025-03-26"
 		}
 		reply(map[string]any{"protocolVersion": params.ProtocolVersion, "capabilities": map[string]any{"tools": map[string]any{}},
-			"serverInfo": map[string]any{"name": "verdantflare-hub-market", "version": "1"}})
+			"serverInfo": map[string]any{"name": endpoint.serverName, "version": "1"}})
 	case "ping":
 		reply(map[string]any{})
 	case "tools/list":
-		reply(map[string]any{"tools": hubMCPTools(identity.Purpose)})
+		reply(map[string]any{"tools": endpoint.tools(identity.Purpose)})
 	case "tools/call":
 		var params struct {
 			Name      string          `json:"name"`
@@ -132,18 +153,18 @@ func (s *Server) hubMCP(w http.ResponseWriter, r *http.Request) {
 		if len(params.Arguments) == 0 {
 			params.Arguments = json.RawMessage("{}")
 		}
-		result, err := s.callHubMCPTool(r, identity, params.Name, params.Arguments)
+		result, err := endpoint.call(r, identity, params.Name, params.Arguments)
 		if err != nil {
-			failure, logInternal := hubMCPFailure(err, identity.Purpose)
+			failure, logInternal := endpoint.failure(err, identity.Purpose)
 			if logInternal {
-				s.logger.Error("hub mcp tool failed", "request_id", requestID(r.Context()), "tool", params.Name, "error", err)
+				s.logger.Error(endpoint.serverName+" tool failed", "request_id", requestID(r.Context()), "tool", params.Name, "error", err)
 			}
 			retryable := failure.Status == http.StatusTooManyRequests || failure.Status == http.StatusBadGateway || failure.Status == http.StatusServiceUnavailable || failure.Status == http.StatusGatewayTimeout
 			content := map[string]any{"status": failure.Status, "code": failure.Code, "message": failure.Message, "retryable": retryable}
 			reply(map[string]any{"isError": true, "structuredContent": content, "content": mcpTextContent(content)})
 			return
 		}
-		s.logger.Info("hub mcp tool", "request_id", requestID(r.Context()), "tool", params.Name, "token_id", identity.TokenID)
+		s.logger.Info(endpoint.serverName+" tool", "request_id", requestID(r.Context()), "tool", params.Name, "token_id", identity.TokenID)
 		reply(map[string]any{"structuredContent": result, "content": mcpTextContent(result)})
 	default:
 		writeJSON(w, http.StatusOK, map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32601, "message": "不支持的方法"}})

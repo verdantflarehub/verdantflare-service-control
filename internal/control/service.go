@@ -31,6 +31,7 @@ type Service struct {
 	chartHTTPClient          *http.Client
 	requiredInstallGrantApps map[string]bool
 	modelRunSlots            chan struct{}
+	skillSource              SkillSource
 	now                      func() time.Time
 }
 

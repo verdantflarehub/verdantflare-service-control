@@ -226,3 +226,70 @@ func TestSkillRoleRecheckedAfterOrganizationSwitch(t *testing.T) {
 	}
 	public.Body.Close()
 }
+
+func TestSkillCatalogCreateStartsAsDraft(t *testing.T) {
+	server := newTestServer(t, testConfig())
+	payload := map[string]any{"entryId": "verdantflare-storyboard", "name": "Storyboard", "summary": "把剧本拆成镜头表。",
+		"description": "生成分镜脚本并保存到项目。", "category": "视频创作", "sortOrder": 200}
+	created := request(t, server, http.MethodPost, "/api/control/ops/v2/skills", payload)
+	if created.StatusCode != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", created.StatusCode, readBody(t, created))
+	}
+	var entry domain.SkillCatalogEntry
+	decode(t, created, &entry)
+	created.Body.Close()
+	if entry.EntryID != "verdantflare-storyboard" || entry.Kind != "skill" || entry.Visibility != "draft" || entry.Sample ||
+		entry.Revision != 1 || entry.Distribution != "unavailable" || created.Header.Get("ETag") != `"skill:verdantflare-storyboard:1"` {
+		t.Fatalf("created entry %+v ETag=%s", entry, created.Header.Get("ETag"))
+	}
+	public := request(t, server, http.MethodGet, "/api/control/market/skills/verdantflare-storyboard", nil)
+	if public.StatusCode != http.StatusNotFound {
+		t.Fatalf("new draft visible: %d", public.StatusCode)
+	}
+	public.Body.Close()
+	audit := request(t, server, http.MethodGet, "/api/control/ops/v2/skills/verdantflare-storyboard/audit", nil)
+	var events struct {
+		Items []domain.SkillCatalogAuditEvent `json:"items"`
+	}
+	decode(t, audit, &events)
+	audit.Body.Close()
+	if len(events.Items) != 1 || events.Items[0].Action != "create" {
+		t.Fatalf("audit=%+v", events.Items)
+	}
+
+	for name, tc := range map[string]struct {
+		body map[string]any
+		want int
+	}{
+		"duplicate":       {payload, http.StatusConflict},
+		"uppercase id":    {map[string]any{"entryId": "Storyboard", "name": "x", "summary": "x", "description": "x", "category": "x"}, http.StatusBadRequest},
+		"missing summary": {map[string]any{"entryId": "vf-empty", "name": "x", "description": "x", "category": "x"}, http.StatusBadRequest},
+		"visibility":      {map[string]any{"entryId": "vf-listed", "name": "x", "summary": "x", "description": "x", "category": "x", "visibility": "listed"}, http.StatusBadRequest},
+		"bundle kind":     {map[string]any{"entryId": "vf-bundle", "kind": "bundle", "name": "x", "summary": "x", "description": "x", "category": "x"}, http.StatusBadRequest},
+	} {
+		response := request(t, server, http.MethodPost, "/api/control/ops/v2/skills", tc.body)
+		if response.StatusCode != tc.want {
+			t.Fatalf("%s status=%d want %d body=%s", name, response.StatusCode, tc.want, readBody(t, response))
+		}
+		response.Body.Close()
+	}
+}
+
+func TestSkillCatalogCreateRequiresSkillOperator(t *testing.T) {
+	server := newTestServer(t, config.Config{Environment: "test", TrustAuthHeaders: true})
+	raw, _ := json.Marshal(map[string]any{"entryId": "vf-guest", "name": "x", "summary": "x", "description": "x", "category": "x"})
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/api/control/ops/v2/skills", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-VF-Login-Subject", "new-unbound-user")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("guest create status=%d body=%s", res.StatusCode, readBody(t, res))
+	}
+}

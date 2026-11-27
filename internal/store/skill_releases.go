@@ -37,12 +37,16 @@ func withoutData(release domain.SkillRelease) domain.SkillRelease {
 		files[i] = f
 	}
 	release.Files = files
+	if release.Source != nil {
+		source := *release.Source
+		release.Source = &source
+	}
 	return release
 }
 
 // CreateSkillRelease stores a new candidate. The bool reports whether it was newly created;
-// re-uploading identical content is idempotent and different content is a conflict.
-func (m *Memory) CreateSkillRelease(_ context.Context, release domain.SkillRelease, actor, organizationID string) (domain.SkillRelease, bool, error) {
+// registering identical content again is idempotent and different content is a conflict.
+func (m *Memory) CreateSkillRelease(_ context.Context, release domain.SkillRelease, actor domain.SkillReleaseActor) (domain.SkillRelease, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.skillReleases == nil {
@@ -54,7 +58,11 @@ func (m *Memory) CreateSkillRelease(_ context.Context, release domain.SkillRelea
 		}
 		return withoutData(current), false, nil
 	}
-	release.Status, release.CreatedBy, release.CreatedAt = "candidate", actor, time.Now().UTC()
+	release.Status, release.CreatedBy, release.CreatedAt = "candidate", actor.Subject, time.Now().UTC()
+	if release.Source != nil {
+		source := *release.Source
+		release.Source = &source
+	}
 	files := make([]domain.SkillReleaseFile, len(release.Files))
 	for i, f := range release.Files {
 		f.Data = bytes.Clone(f.Data)
@@ -62,8 +70,13 @@ func (m *Memory) CreateSkillRelease(_ context.Context, release domain.SkillRelea
 	}
 	release.Files = files
 	m.skillReleases[release.ReleaseID] = release
-	m.skillReleaseAudit = append(m.skillReleaseAudit, domain.SkillReleaseAuditEvent{ReleaseID: release.ReleaseID, Action: "upload", ActorSubject: actor, OrganizationID: organizationID, CreatedAt: release.CreatedAt})
+	m.skillReleaseAudit = append(m.skillReleaseAudit, auditEvent(release.ReleaseID, "register", "", actor, release.CreatedAt))
 	return withoutData(release), true, nil
+}
+
+func auditEvent(id, action, reason string, actor domain.SkillReleaseActor, at time.Time) domain.SkillReleaseAuditEvent {
+	return domain.SkillReleaseAuditEvent{ReleaseID: id, Action: action, ActorSubject: actor.Subject, OrganizationID: actor.OrganizationID,
+		TokenID: actor.TokenID, Tool: actor.Tool, Reason: reason, CreatedAt: at}
 }
 
 func (m *Memory) ListSkillReleases(_ context.Context) ([]domain.SkillRelease, error) {
@@ -77,8 +90,18 @@ func (m *Memory) ListSkillReleases(_ context.Context) ([]domain.SkillRelease, er
 	return items, nil
 }
 
+func (m *Memory) GetSkillRelease(_ context.Context, id string) (domain.SkillRelease, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	release, ok := m.skillReleases[id]
+	if !ok {
+		return domain.SkillRelease{}, releaseNotFound()
+	}
+	return withoutData(release), nil
+}
+
 // SetSkillReleaseStatus moves a release to published or withdrawn.
-func (m *Memory) SetSkillReleaseStatus(_ context.Context, id, status, actor, organizationID string) (domain.SkillRelease, error) {
+func (m *Memory) SetSkillReleaseStatus(_ context.Context, id, status, reason string, actor domain.SkillReleaseActor) (domain.SkillRelease, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	release, ok := m.skillReleases[id]
@@ -96,8 +119,21 @@ func (m *Memory) SetSkillReleaseStatus(_ context.Context, id, status, actor, org
 		release.WithdrawnAt = &now
 	}
 	m.skillReleases[id] = release
-	m.skillReleaseAudit = append(m.skillReleaseAudit, domain.SkillReleaseAuditEvent{ReleaseID: id, Action: actionFor(status), ActorSubject: actor, OrganizationID: organizationID, CreatedAt: now})
+	m.skillReleaseAudit = append(m.skillReleaseAudit, auditEvent(id, actionFor(status), reason, actor, now))
 	return withoutData(release), nil
+}
+
+// SkillReleaseAudit returns the newest management events of one release; downloads are left out.
+func (m *Memory) SkillReleaseAudit(_ context.Context, id string, limit int) ([]domain.SkillReleaseAuditEvent, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	events := make([]domain.SkillReleaseAuditEvent, 0)
+	for i := len(m.skillReleaseAudit) - 1; i >= 0 && len(events) < limit; i-- {
+		if e := m.skillReleaseAudit[i]; e.ReleaseID == id && e.Action != "download" {
+			events = append(events, e)
+		}
+	}
+	return events, nil
 }
 
 func (m *Memory) SkillReleaseFile(_ context.Context, id, name string) (domain.SkillReleaseFile, error) {
@@ -131,7 +167,7 @@ func checkReleaseTransition(from, to string) error {
 	case to == "published" && from == "published", to == "withdrawn" && from == "withdrawn":
 		return domain.NewError(409, "skill_release_unchanged", "发行已处于该状态")
 	case to == "published" && from == "withdrawn":
-		return domain.NewError(409, "skill_release_withdrawn", "已撤回的发行不能重新发布，请上传新版本")
+		return domain.NewError(409, "skill_release_withdrawn", "已撤回的发行不能重新发布，请登记新版本")
 	case to == "withdrawn" && from == "candidate":
 		return domain.NewError(409, "skill_release_not_published", "候选发行尚未发布，无需撤回")
 	}
