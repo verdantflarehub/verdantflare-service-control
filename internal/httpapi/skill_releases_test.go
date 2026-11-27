@@ -51,6 +51,8 @@ type inputOptions struct {
 	install string
 	commit  string
 	dirty   bool
+	schema  string
+	ids     []string
 }
 
 // syntheticSkillInput builds a handoff archive in the same layout as the
@@ -65,7 +67,11 @@ func syntheticSkillInput(t *testing.T, releaseID string, options ...inputOptions
 	lock, _ := json.Marshal(map[string]any{"release_id": releaseID, "source_repository": map[string]any{"commit": opt.commit, "dirty": opt.dirty}})
 	outer["candidate/source-lock.json"] = lock
 	packages := []map[string]any{}
-	for _, id := range skillrelease.SkillIDs() {
+	ids := opt.ids
+	if ids == nil {
+		ids = skillrelease.SkillIDs()
+	}
+	for _, id := range ids {
 		skillMD := []byte("# " + id + "\n")
 		pkg := zipOf(t, map[string][]byte{id + "/SKILL.md": skillMD})
 		manifest, _ := json.Marshal(map[string]any{"skill_id": id, "files": []map[string]any{{"path": id + "/SKILL.md", "sha256": sum(skillMD), "size": len(skillMD)}}})
@@ -79,7 +85,11 @@ func syntheticSkillInput(t *testing.T, releaseID string, options ...inputOptions
 			"artifact": map[string]any{"path": "packages/" + id + ".zip", "sha256": sum(pkg), "size": len(pkg),
 				"file_manifest": "manifests/" + id + ".json", "file_manifest_sha256": sum(manifest)}})
 	}
-	release, _ := json.Marshal(map[string]any{"schema_version": "vf.skills.handoff/v2", "release_id": releaseID, "release_stage": "integration-candidate",
+	schema := opt.schema
+	if schema == "" {
+		schema = "vf.skills.handoff/v2"
+	}
+	release, _ := json.Marshal(map[string]any{"schema_version": schema, "release_id": releaseID, "release_stage": "integration-candidate",
 		"authentication": "unsigned", "source_lock_sha256": sum(lock), "packages": packages})
 	outer["candidate/release-manifest.json"] = release
 	install, users := []byte(opt.install), []byte("# 用户技能\n")

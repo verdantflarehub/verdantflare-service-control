@@ -3,6 +3,7 @@ package skillrelease
 import (
 	"encoding/json"
 	"errors"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -18,8 +19,9 @@ type File struct {
 	Data     []byte   `json:"-"`
 }
 
-// Input is a verified handoff archive: 11 skill ZIPs plus the same-release guides.
+// Input is a verified handoff archive plus its same-release guides.
 type Input struct {
+	SchemaVersion  string
 	ReleaseID      string
 	Stage          string
 	Authentication string
@@ -43,6 +45,8 @@ type guideManifest struct {
 
 var guideNames = []string{"Install.md", "USER-SKILLS.md"}
 
+var selectedSkillID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
+
 // ParseHandoffInput checks a `vf-hub-skill-input-*` archive and returns the
 // fixed files to store. It verifies integrity only; it does not authenticate
 // the publisher. Publication remains an explicit skill_ops_admin action.
@@ -63,7 +67,8 @@ func ParseHandoffInput(data []byte) (Input, error) {
 	if err := json.Unmarshal(manifestBytes, &c); err != nil {
 		return in, errors.New("skill input: invalid release manifest")
 	}
-	if c.SchemaVersion != "vf.skills.handoff/v2" || !validReleaseID(c.ReleaseID) {
+	selected := c.SchemaVersion == "vf.skills.handoff/v3"
+	if (!selected && c.SchemaVersion != "vf.skills.handoff/v2") || !validReleaseID(c.ReleaseID) {
 		return in, errors.New("skill input: unsupported manifest schema or release id")
 	}
 	if !validDigest(c.SourceLockSHA256) {
@@ -84,12 +89,19 @@ func ParseHandoffInput(data []byte) (Input, error) {
 	if lock.SourceRepository != nil && lock.SourceRepository.Dirty != nil {
 		sourceCommit, sourceDirty = lock.SourceRepository.Commit, *lock.SourceRepository.Dirty
 	}
-	if len(c.Packages) != len(skillIDs) {
+	if selected && (len(c.Packages) == 0 || len(c.Packages) > 32) {
+		return in, errors.New("skill input: selected release requires 1 to 32 skills")
+	}
+	if !selected && len(c.Packages) != len(skillIDs) {
 		return in, errors.New("skill input: expected exactly 11 skills")
 	}
 	byID := make(map[string]candidatePack, len(c.Packages))
 	for _, p := range c.Packages {
-		if !skillIDs[p.ID] || p.Version != c.ReleaseID || p.Status != "assembled" || len(p.Blockers) != 0 {
+		validID := skillIDs[p.ID]
+		if selected {
+			validID = selectedSkillID.MatchString(p.ID)
+		}
+		if !validID || p.Version != c.ReleaseID || p.Status != "assembled" || len(p.Blockers) != 0 {
 			return in, errors.New("skill input: invalid package " + p.ID)
 		}
 		if _, exists := byID[p.ID]; exists {
@@ -97,6 +109,27 @@ func ParseHandoffInput(data []byte) (Input, error) {
 		}
 		if err := verifyPackage(outer, p); err != nil {
 			return in, err
+		}
+		if selected {
+			pkgBytes, err := readEntry(outer, "candidate/"+p.Artifact.Path)
+			if err != nil {
+				return in, err
+			}
+			pkg, err := archiveEntries(pkgBytes)
+			if err != nil {
+				return in, err
+			}
+			entry, err := readEntry(pkg, p.ID+"/SKILL.md")
+			if err != nil || len(strings.TrimSpace(string(entry))) == 0 {
+				return in, errors.New("skill input: selected package requires SKILL.md")
+			}
+			deps := map[string]bool{}
+			for _, dep := range p.Requires {
+				if !selectedSkillID.MatchString(dep) || deps[dep] {
+					return in, errors.New("skill input: invalid or duplicate dependency")
+				}
+				deps[dep] = true
+			}
 		}
 		byID[p.ID] = p
 	}
@@ -135,7 +168,7 @@ func ParseHandoffInput(data []byte) (Input, error) {
 		files = append(files, File{Name: id + ".zip", Kind: "package", SkillID: id, Requires: append([]string(nil), p.Requires...),
 			SHA256: p.Artifact.SHA256, Size: int64(len(content)), Data: content})
 	}
-	return Input{ReleaseID: c.ReleaseID, Stage: c.ReleaseStage, Authentication: c.Authentication,
+	return Input{SchemaVersion: c.SchemaVersion, ReleaseID: c.ReleaseID, Stage: c.ReleaseStage, Authentication: c.Authentication,
 		ManifestSHA256: manifestDigest, ArchiveSHA256: hash(data), SourceCommit: sourceCommit, SourceDirty: sourceDirty, Files: files}, nil
 }
 
@@ -154,7 +187,7 @@ func validReleaseID(id string) bool {
 	return !strings.HasPrefix(id, ".") && !strings.Contains(id, "..")
 }
 
-// SkillIDs returns the 11 user skill ids accepted in a release.
+// SkillIDs returns the fixed legacy v2 skill IDs. Selected v3 inputs use catalog IDs.
 func SkillIDs() []string {
 	ids := make([]string, 0, len(skillIDs))
 	for id := range skillIDs {

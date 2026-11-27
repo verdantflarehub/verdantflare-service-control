@@ -130,6 +130,18 @@ func (s *Service) RegisterSkillRelease(ctx context.Context, caller SkillActor, r
 	release := domain.SkillRelease{ReleaseID: input.ReleaseID, Stage: input.Stage, Authentication: input.Authentication,
 		ManifestSHA256: input.ManifestSHA256, ArchiveSHA256: input.ArchiveSHA256, Source: &source}
 	for _, f := range input.Files {
+		if input.SchemaVersion == "vf.skills.handoff/v3" && f.Kind == "package" {
+			entry, err := s.repository.SkillEntry(ctx, f.SkillID)
+			if err != nil {
+				if isNotFound(err) {
+					return domain.SkillRelease{}, false, domain.NewError(422, "skill_release_catalog_missing", "请先建立发行中每个技能的目录资料")
+				}
+				return domain.SkillRelease{}, false, err
+			}
+			if entry.Kind != "skill" {
+				return domain.SkillRelease{}, false, domain.NewError(422, "skill_release_catalog_invalid", "发行包必须对应单技能，不能对应能力组合")
+			}
+		}
 		release.Files = append(release.Files, domain.SkillReleaseFile{Name: f.Name, Kind: f.Kind, SkillID: f.SkillID,
 			Requires: f.Requires, SHA256: f.SHA256, Size: f.Size, Data: f.Data})
 	}
